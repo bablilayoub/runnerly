@@ -182,9 +182,11 @@ function Hero() {
  * Numbers that are true and checkable, not impressions. Each one is
  * something a reader could verify from the repository in a minute.
  */
+// Recount before changing any of these. The test figure is
+//   grep -rh "^func Test" --include '*_test.go' internal | wc -l
 const STATS = [
   { figure: "3", label: "dependencies", note: "cobra, yaml.v3 and pgx. Nothing else." },
-  { figure: "424", label: "tests", note: "run against real Postgres and Docker in CI" },
+  { figure: "434", label: "tests", note: "run against real Postgres and Docker in CI" },
   { figure: "0", label: "lines of the runner reimplemented", note: "it wraps GitHub's own" },
   { figure: "15", label: "pages of documentation", note: "including what is not built" },
 ] as const
