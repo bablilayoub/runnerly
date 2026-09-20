@@ -72,6 +72,16 @@ executor:
   # "docker" - the machine runs the runner with Docker available for
   #            containerized steps and job containers
   type: docker
+  docker:
+    # Overrides DOCKER_HOST for the runner. Empty uses Docker's default.
+    host: ""
+    # What to do with what a job leaves behind: after_job or never. Only
+    # what appeared during the job is removed. See docs/docker.md.
+    cleanup: after_job
+    # Also remove dangling images. Off by default: they are cache.
+    prune_images: false
+    # Bounds each docker command the agent runs.
+    timeout: 2m
 
 updates:
   # Whether Runnerly may upgrade itself and the GitHub runner unattended.
@@ -101,7 +111,7 @@ The configuration changes what `doctor` checks:
 | Setting | Effect |
 | --- | --- |
 | `executor.type: host` | the Docker checks are skipped |
-| `executor.type: docker` | a missing Docker CLI is a failure |
+| `executor.type: docker` | a missing Docker CLI is a failure, and disk space is checked |
 | `runner.dir` | where `runner create` installs, plus the runner name |
 | `server.url: ""` | the control-plane check is skipped |
 | `server.url` set | `GET <url>/api/v1/health` must return 200 |

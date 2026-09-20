@@ -9,12 +9,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/github"
+	"github.com/bablilayoub/runnerly/internal/jobstate"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 )
@@ -460,4 +463,217 @@ var errProcessCrashed = errors.New("crashed")
 // testLogger discards output but is not nil, so code under test logs freely.
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestConfigureOnlySetsUpHooksForTheDockerExecutor(t *testing.T) {
+	host := config.Default()
+	host.Executor.Type = config.ExecutorHost
+
+	hooks, env := Configure(host, "/etc/runnerly/config.yaml")
+	if hooks.Install {
+		t.Error("the host executor installed job hooks; there is nothing to clean up")
+	}
+	if len(env) != 0 {
+		t.Errorf("env = %v, want nothing for the host executor", env)
+	}
+}
+
+func TestConfigureForDocker(t *testing.T) {
+	cfg := config.Default()
+	cfg.Executor.Type = config.ExecutorDocker
+	cfg.Executor.Docker.Host = "unix:///run/user/1000/docker.sock"
+
+	hooks, env := Configure(cfg, "/etc/runnerly/config.yaml")
+	if !hooks.Install {
+		t.Fatal("the Docker executor did not install job hooks")
+	}
+	if hooks.ConfigPath != "/etc/runnerly/config.yaml" {
+		t.Errorf("ConfigPath = %q", hooks.ConfigPath)
+	}
+	if hooks.Binary == "" {
+		t.Error("the hooks have no binary to call")
+	}
+	if !filepath.IsAbs(hooks.Binary) {
+		t.Errorf("Binary = %q, want an absolute path: hooks run with no known working directory", hooks.Binary)
+	}
+
+	// The runner starts job containers itself, so it needs the same daemon.
+	if len(env) != 1 || !strings.Contains(env[0], "DOCKER_HOST=unix:///run/user/1000/docker.sock") {
+		t.Errorf("env = %v", env)
+	}
+}
+
+func TestRunnerInheritsTheEnvironmentPlusWhatRunnerlyAdds(t *testing.T) {
+	r := installedRunner(t, "runnerly-01")
+	t.Setenv("RUNNERLY_TEST_MARKER", "present")
+
+	var got []string
+	err := Run(context.Background(), Options{
+		Runner:   r,
+		ExtraEnv: []string{"DOCKER_HOST=unix:///custom.sock"},
+		Backoff:  supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
+		Start: func(opts supervisor.ProcessOptions) (supervisor.Process, error) {
+			got = opts.Env
+			p := newFakeProcess()
+			p.finish(errProcessCrashed)
+			return p, nil
+		},
+	})
+	if !errors.Is(err, supervisor.ErrGaveUp) {
+		t.Fatalf("Run() = %v", err)
+	}
+
+	joined := strings.Join(got, "\n")
+	// A build needs PATH and everything else, so the runner's environment
+	// starts from the agent's rather than replacing it.
+	if !strings.Contains(joined, "RUNNERLY_TEST_MARKER=present") {
+		t.Error("the runner did not inherit the agent's environment")
+	}
+	if !strings.Contains(joined, "DOCKER_HOST=unix:///custom.sock") {
+		t.Error("the extra environment was not passed to the runner")
+	}
+}
+
+func TestHooksAreInstalledAndPointedAt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hooks are not implemented for Windows runners")
+	}
+	r := installedRunner(t, "runnerly-01")
+
+	var got []string
+	err := Run(context.Background(), Options{
+		Runner:  r,
+		Hooks:   HookOptions{Install: true, Binary: "/usr/local/bin/runnerly", ConfigPath: "/etc/c.yaml"},
+		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
+		Start: func(opts supervisor.ProcessOptions) (supervisor.Process, error) {
+			got = opts.Env
+			p := newFakeProcess()
+			p.finish(errProcessCrashed)
+			return p, nil
+		},
+	})
+	if !errors.Is(err, supervisor.ErrGaveUp) {
+		t.Fatalf("Run() = %v", err)
+	}
+
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{jobstate.HookStartedEnv, jobstate.HookCompletedEnv} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the runner was not pointed at %s", want)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(jobstate.StateDir(r.Dir), "job-started.sh")); statErr != nil {
+		t.Errorf("the started hook was not written: %v", statErr)
+	}
+}
+
+func TestAFailedHookInstallDoesNotStopTheRunner(t *testing.T) {
+	r := installedRunner(t, "runnerly-01")
+
+	// No binary path, so installing the hooks fails. The runner must still
+	// run: unobserved is better than not running at all.
+	started := false
+	err := Run(context.Background(), Options{
+		Runner:  r,
+		Hooks:   HookOptions{Install: true, ConfigPath: "/etc/c.yaml"},
+		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
+		Start: func(supervisor.ProcessOptions) (supervisor.Process, error) {
+			started = true
+			p := newFakeProcess()
+			p.finish(errProcessCrashed)
+			return p, nil
+		},
+	})
+	if !errors.Is(err, supervisor.ErrGaveUp) {
+		t.Fatalf("Run() = %v", err)
+	}
+	if !started {
+		t.Error("the runner never started because the hooks could not be installed")
+	}
+}
+
+func TestBusyIsReportedFromTheJobHooks(t *testing.T) {
+	fake := newFakeControlPlane(t)
+	r := installedRunner(t, "runnerly-01")
+	statePath := jobstate.Path(r.Dir)
+
+	if err := jobstate.Write(statePath, jobstate.State{
+		Status:     jobstate.StatusRunning,
+		Repository: "acme/widgets",
+		Workflow:   "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	proc := newFakeProcess()
+	started := make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Runner:            r,
+			ControlPlane:      fake.client(),
+			HeartbeatInterval: 10 * time.Millisecond,
+			Hooks:             HookOptions{Install: true, Binary: "/usr/local/bin/runnerly"},
+			Start: func(supervisor.ProcessOptions) (supervisor.Process, error) {
+				close(started)
+				return proc, nil
+			},
+		})
+	}()
+
+	<-started
+	// Give a few heartbeats time to go out.
+	time.Sleep(60 * time.Millisecond)
+	cancel()
+	<-done
+
+	var sawBusy bool
+	for _, status := range fake.statuses() {
+		if status == statusBusy {
+			sawBusy = true
+		}
+	}
+	if !sawBusy {
+		t.Errorf("the runner never reported busy while a job was running: %v", fake.statuses())
+	}
+}
+
+func TestWithoutHooksTheAgentDoesNotGuessBusy(t *testing.T) {
+	fake := newFakeControlPlane(t)
+	r := installedRunner(t, "runnerly-01")
+
+	// A job file exists, but hooks are off, so the agent has no business
+	// reading it and must not claim to know.
+	if err := jobstate.Write(jobstate.Path(r.Dir), jobstate.State{Status: jobstate.StatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+
+	proc := newFakeProcess()
+	started := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Runner:            r,
+			ControlPlane:      fake.client(),
+			HeartbeatInterval: 10 * time.Millisecond,
+			Start: func(supervisor.ProcessOptions) (supervisor.Process, error) {
+				close(started)
+				return proc, nil
+			},
+		})
+	}()
+
+	<-started
+	time.Sleep(60 * time.Millisecond)
+	cancel()
+	<-done
+
+	for _, status := range fake.statuses() {
+		if status == statusBusy {
+			t.Error("the agent reported busy without job hooks installed")
+		}
+	}
 }

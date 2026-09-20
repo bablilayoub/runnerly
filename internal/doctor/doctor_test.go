@@ -457,3 +457,67 @@ func TestCredentialsCheckSkippedWhenOffline(t *testing.T) {
 		t.Errorf("GitHub credentials = %q, want skip when offline", got.Status)
 	}
 }
+
+func TestDockerDiskCheckSkippedWithoutADaemon(t *testing.T) {
+	srv := okServer(t)
+	env := healthyEnv(t, srv.URL)
+	env.LookPath = func(file string) (string, error) {
+		if file == "docker" {
+			return "", exec.ErrNotFound
+		}
+		return "/usr/bin/" + file, nil
+	}
+
+	report := Run(context.Background(), Options{Config: config.Default(), Token: "t", Env: env})
+	if got := byName(t, report, "docker disk space"); got.Status != StatusSkip {
+		t.Errorf("docker disk space = %q, want skip when there is no daemon", got.Status)
+	}
+}
+
+func TestDockerDiskCheckReadsTheRealFilesystem(t *testing.T) {
+	srv := okServer(t)
+	env := healthyEnv(t, srv.URL)
+	// Point Docker's root at a directory that certainly exists, so the
+	// check exercises the real statfs rather than a fake number.
+	root := t.TempDir()
+	env.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "info" {
+			for _, a := range args {
+				if strings.Contains(a, "DockerRootDir") {
+					return []byte(root + "\n"), nil
+				}
+			}
+			return []byte("27.0.1\n"), nil
+		}
+		return []byte("27.0.1\n"), nil
+	}
+
+	report := Run(context.Background(), Options{Config: config.Default(), Token: "t", Env: env})
+	c := byName(t, report, "docker disk space")
+
+	if c.Status == StatusSkip {
+		t.Skipf("free space is not readable on this platform: %s", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "free of") {
+		t.Errorf("detail should report free and total: %q", c.Detail)
+	}
+	// A developer machine running this test has more than 2 GiB free.
+	if c.Status == StatusFail {
+		t.Errorf("disk reported as critically low: %q", c.Detail)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	tests := map[uint64]string{
+		512:     "512 B",
+		2048:    "2.0 KiB",
+		5 << 20: "5.0 MiB",
+		3 << 30: "3.0 GiB",
+		2 << 40: "2.0 TiB",
+	}
+	for value, want := range tests {
+		if got := humanBytes(value); got != want {
+			t.Errorf("humanBytes(%d) = %q, want %q", value, got, want)
+		}
+	}
+}

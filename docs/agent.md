@@ -185,9 +185,13 @@ oldest are dropped if the control plane cannot keep up, with the count logged.
 A failed heartbeat is logged and retried on the next tick. A control plane
 that is down does not take a working runner with it.
 
-The agent reports `starting`, `online`, `stopping`, `offline` and `error`. It
-does not report `busy`: whether a job is running is GitHub's view, and the
-agent would have to guess at it by parsing the runner's output.
+The agent reports `starting`, `online`, `busy`, `stopping`, `offline` and
+`error`.
+
+`busy` comes from the job hooks the Docker executor installs, which the runner
+itself calls when a job starts and finishes. With `executor.type: host` no
+hooks are installed and the agent reports `online` rather than guessing at
+what the runner is doing. See [docker.md](docker.md).
 
 ## Commands from the control plane
 

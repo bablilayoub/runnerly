@@ -134,7 +134,8 @@ func Run(ctx context.Context, opts Options) Report {
 	}
 
 	dockerInstalled := checkDocker(opts)
-	checks = append(checks, dockerInstalled, checkDockerDaemon(ctx, opts, dockerInstalled.Status))
+	daemon := checkDockerDaemon(ctx, opts, dockerInstalled.Status)
+	checks = append(checks, dockerInstalled, daemon, checkDockerDisk(ctx, opts, daemon.Status))
 	checks = append(checks,
 		checkOutboundHTTPS(ctx, opts),
 		checkGitHubAPI(ctx, opts),
@@ -260,6 +261,71 @@ func checkDockerDaemon(ctx context.Context, opts Options, dockerStatus Status) C
 	c.Status = StatusPass
 	c.Detail = "server version " + firstLine(string(out))
 	return c
+}
+
+// Disk thresholds for the Docker executor. Images and layer cache are what
+// fill a runner's disk, and a build that dies half way through a pull is a
+// confusing way to find out.
+const (
+	diskFailBelow = 2 << 30  // 2 GiB
+	diskWarnBelow = 10 << 30 // 10 GiB
+)
+
+func checkDockerDisk(ctx context.Context, opts Options, daemonStatus Status) Check {
+	c := Check{Name: "docker disk space"}
+	if daemonStatus != StatusPass {
+		c.Status = StatusSkip
+		c.Detail = "the Docker daemon is unavailable, so its storage was not checked"
+		return c
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+
+	out, err := opts.Env.Run(ctx, "docker", "info", "--format", "{{.DockerRootDir}}")
+	root := firstLine(string(out))
+	if err != nil || root == "" || root == "no output" {
+		c.Status = StatusSkip
+		c.Detail = "could not find where Docker stores its data"
+		return c
+	}
+
+	free, total, err := diskFree(root)
+	if err != nil {
+		c.Status = StatusSkip
+		c.Detail = fmt.Sprintf("could not read the free space on %s: %v", root, err)
+		return c
+	}
+
+	detail := fmt.Sprintf("%s free of %s on %s", humanBytes(free), humanBytes(total), root)
+	switch {
+	case free < diskFailBelow:
+		c.Status = StatusFail
+		c.Detail = detail + "\nJobs will fail part way through pulling images."
+		c.Remedy = "docker system prune --all --volumes"
+	case free < diskWarnBelow:
+		c.Status = StatusWarn
+		c.Detail = detail + "\nImage layers accumulate quickly on a runner."
+		c.Remedy = "docker system prune"
+	default:
+		c.Status = StatusPass
+		c.Detail = detail
+	}
+	return c
+}
+
+// humanBytes renders a byte count for an operator.
+func humanBytes(value uint64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := uint64(unit), 0
+	for n := value / unit; n >= unit && exp < 4; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTP"[exp])
 }
 
 func checkOutboundHTTPS(ctx context.Context, opts Options) Check {

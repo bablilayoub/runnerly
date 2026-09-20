@@ -54,6 +54,13 @@ cross-job contamination. It does **not** give you the boundary a virtual
 machine does. A container sharing the host kernel, and especially one with
 access to the Docker socket, should be treated as having a path to the host.
 
+Concretely: **anything that can reach the Docker socket has root on the
+host**, because it can start a container that mounts `/`. Adding the runner's
+user to the `docker` group grants that user root, and a workflow that mounts
+the socket into a job container hands the host to whatever runs there.
+Rootless Docker is a real improvement; point `executor.docker.host` at it.
+See [docker.md](docker.md).
+
 If you need a real boundary, use a disposable VM per job. VM-backed isolation
 is on the roadmap and is not implemented.
 

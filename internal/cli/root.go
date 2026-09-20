@@ -13,6 +13,7 @@ import (
 
 	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/config"
+	"github.com/bablilayoub/runnerly/internal/docker"
 	"github.com/bablilayoub/runnerly/internal/github"
 	"github.com/bablilayoub/runnerly/internal/runner"
 	"github.com/bablilayoub/runnerly/internal/state"
@@ -47,6 +48,9 @@ type env struct {
 	// runnerEnv is how the CLI reaches the machine when installing a runner.
 	// Tests replace it so no archive is downloaded and no script is executed.
 	runnerEnv func() runner.Env
+	// newDockerClient builds the Docker client. Nil uses the real one; tests
+	// replace it so no daemon is needed.
+	newDockerClient func(config.Config) *docker.Client
 }
 
 // newEnv returns the default environment, wired to the real GitHub.

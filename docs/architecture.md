@@ -54,6 +54,8 @@ internal/agent/      supervising one runner, and its structured logs
 internal/auth/       GitHub credential resolution and storage
 internal/config/     configuration schema, loading, validation
 internal/controlplane/ the agent's client for the server
+internal/docker/     preparing and tidying the Docker environment
+internal/jobstate/   what the runner is doing, via GitHub's job hooks
 internal/doctor/     machine diagnostics and their rendering
 internal/github/     a narrow GitHub REST client
 internal/runner/     installing and configuring actions/runner
@@ -113,6 +115,28 @@ commented configuration file, and so the agent has something to read that
 answers "what am I supervising?" without inferring it. It is also what lets
 `runner list`, `runner remove` and the agent work without `--repo` on a machine
 with one runner.
+
+## Why cleanup diffs snapshots instead of pruning
+
+`docker system prune` would be one line. It would also delete a stopped
+container belonging to something else on the machine, and a self-hosted
+runner is frequently not the only thing on its host.
+
+So the Docker executor records what exists when a job starts and removes what
+appeared by the time it finishes. It costs three `docker ls` calls per job and
+cannot take anything that was not the job's.
+
+## Why the job hooks earn their place
+
+GitHub's runner will call a script before and after each job. That is the only
+supported way to learn, from outside, that a job has started — and it gave
+Runnerly two things at once: a moment to clean up, and an honest answer for
+`busy`, which until then the agent had been unable to distinguish from
+`online`.
+
+The hooks are one-line shell scripts that hand over to the Runnerly binary,
+so the logic is Go that can be tested rather than shell that cannot. They
+always exit 0, because a hook that fails takes the job with it.
 
 ## Why commands travel on the heartbeat
 

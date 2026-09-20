@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
+	"github.com/bablilayoub/runnerly/internal/jobstate"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 )
@@ -55,6 +56,25 @@ type Options struct {
 	ControlPlane *controlplane.Client
 	// HeartbeatInterval is how often to report. Zero uses the default.
 	HeartbeatInterval time.Duration
+	// Hooks installs the job hooks that tell Runnerly when a job starts and
+	// finishes. Without them the agent can see that the runner process is
+	// alive but not whether it is doing anything.
+	Hooks HookOptions
+	// ExtraEnv is added to the runner's environment, for DOCKER_HOST and
+	// anything else the executor needs.
+	ExtraEnv []string
+}
+
+// HookOptions describes the job hooks to install.
+type HookOptions struct {
+	// Install turns them on. They are the Docker executor's mechanism for
+	// cleanup, and the only way the agent learns a runner is busy.
+	Install bool
+	// Binary is the runnerly executable the hooks call.
+	Binary string
+	// ConfigPath is passed to the hooks, so they resolve the same
+	// configuration the agent did.
+	ConfigPath string
 }
 
 // Run supervises the runner until the context is canceled or the backoff
@@ -80,11 +100,43 @@ func Run(ctx context.Context, opts Options) error {
 		output = io.Discard
 	}
 
+	// The runner's environment starts from this process's, so it keeps PATH
+	// and everything else a build needs, and gains what Runnerly adds.
+	runnerEnv := append(os.Environ(), opts.ExtraEnv...) //nolint:gocritic // a new slice is intended
+
+	if opts.Hooks.Install {
+		hooks, err := jobstate.InstallHooks(opts.Runner.Dir, opts.Hooks.Binary, opts.Hooks.ConfigPath)
+		if err != nil {
+			// Without hooks the runner still works; it just runs unobserved
+			// and nothing cleans up after it. That is worth saying loudly
+			// but not worth refusing to start over.
+			log.Warn("could not install the job hooks, so jobs will run unobserved",
+				"event", "hooks_unavailable", "error", err.Error())
+		} else {
+			runnerEnv = append(runnerEnv, hooks.Env()...)
+			log.Info("installed the job hooks",
+				"event", "hooks_installed", "dir", jobstate.StateDir(opts.Runner.Dir))
+		}
+	}
+
 	// Reporting is wired in before the supervisor starts, so the first
 	// transition is not missed.
 	var report *reporter
 	if opts.ControlPlane != nil {
 		report = newReporter(opts.ControlPlane, log, opts.HeartbeatInterval)
+		// Whether a job is running is the hooks' answer, not something the
+		// agent can infer from the process being alive.
+		if opts.Hooks.Install {
+			statePath := jobstate.Path(opts.Runner.Dir)
+			report.jobState = func() jobstate.State {
+				state, err := jobstate.Read(statePath)
+				if err != nil {
+					log.Warn("could not read the job state",
+						"event", "job_state_unreadable", "error", err.Error())
+				}
+				return state
+			}
+		}
 	}
 
 	onEvent := func(e supervisor.Event) {
@@ -98,6 +150,7 @@ func Run(ctx context.Context, opts Options) error {
 		Process: supervisor.ProcessOptions{
 			Dir:     opts.Runner.Dir,
 			Command: script,
+			Env:     runnerEnv,
 			Stdout:  output,
 			Stderr:  output,
 		},

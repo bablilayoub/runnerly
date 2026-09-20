@@ -134,7 +134,40 @@ type Runner struct {
 
 // Executor selects the execution mode.
 type Executor struct {
-	Type ExecutorType `yaml:"type"`
+	Type   ExecutorType `yaml:"type"`
+	Docker Docker       `yaml:"docker"`
+}
+
+// Cleanup policies for what a job leaves behind in Docker.
+const (
+	// CleanupNever leaves everything in place.
+	CleanupNever = "never"
+	// CleanupAfterJob removes what appeared during the job.
+	CleanupAfterJob = "after_job"
+)
+
+// Docker configures the Docker executor.
+//
+// It does not make jobs run in containers: whether a job is containerized is
+// decided by the workflow's own `container:` and `services:` keys. What this
+// controls is the Docker environment those keys rely on, and what happens to
+// what they leave behind.
+type Docker struct {
+	// Host overrides DOCKER_HOST for the runner, for a non-default socket or
+	// a rootless daemon. Empty uses Docker's own default.
+	Host string `yaml:"host"`
+	// Cleanup decides what to remove when a job finishes: "after_job" or
+	// "never".
+	//
+	// Cleanup only removes what appeared while the job ran. A shared machine
+	// running other containers keeps them.
+	Cleanup string `yaml:"cleanup"`
+	// PruneImages also removes dangling images after a job. Off by default:
+	// it reclaims disk at the cost of re-pulling layers on the next job.
+	PruneImages bool `yaml:"prune_images"`
+	// Timeout bounds each docker command the agent runs. Zero uses a
+	// sensible default.
+	Timeout Duration `yaml:"timeout"`
 }
 
 // Updates controls how Runnerly upgrades itself and the GitHub runner.
@@ -179,8 +212,14 @@ func Default() Config {
 		Runner: Runner{
 			Labels: defaultLabels(),
 		},
-		Executor: Executor{Type: ExecutorDocker},
-		Updates:  Updates{Auto: false},
+		Executor: Executor{
+			Type: ExecutorDocker,
+			Docker: Docker{
+				Cleanup: CleanupAfterJob,
+				Timeout: Duration(2 * time.Minute),
+			},
+		},
+		Updates: Updates{Auto: false},
 		Security: Security{
 			AllowPublicRepositories: false,
 			AllowForkWorkflows:      false,
@@ -196,6 +235,16 @@ func defaultLabels() []string {
 		arch = "x64"
 	}
 	return []string{runtime.GOOS, arch, "runnerly"}
+}
+
+// CleanupAfterJob reports whether the Docker executor should tidy up when a
+// job finishes.
+func (c Config) CleanupAfterJob() bool {
+	if c.Executor.Type != ExecutorDocker {
+		return false
+	}
+	// Empty means the default, which is to clean up.
+	return c.Executor.Docker.Cleanup != CleanupNever
 }
 
 // DefaultRunnerDir returns where the official GitHub runner is installed when
@@ -328,6 +377,16 @@ func Validate(cfg Config) error {
 	default:
 		return fmt.Errorf("executor.type: %q is not valid (use %q or %q)",
 			cfg.Executor.Type, ExecutorHost, ExecutorDocker)
+	}
+
+	switch cfg.Executor.Docker.Cleanup {
+	case "", CleanupNever, CleanupAfterJob:
+	default:
+		return fmt.Errorf("executor.docker.cleanup: %q is not valid (use %q or %q)",
+			cfg.Executor.Docker.Cleanup, CleanupAfterJob, CleanupNever)
+	}
+	if cfg.Executor.Docker.Timeout < 0 {
+		return errors.New("executor.docker.timeout: must not be negative")
 	}
 
 	if cfg.GitHub.Host == "" {

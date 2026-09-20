@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
+	"github.com/bablilayoub/runnerly/internal/jobstate"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
@@ -39,16 +40,22 @@ type reporter struct {
 	// restart is called when the control plane asks for one. Nil means the
 	// agent cannot honor the command and says so rather than dropping it.
 	restart func() bool
+	// jobState reports whether a job is running. Nil means the agent has no
+	// job hooks installed and cannot tell, in which case it reports what it
+	// does know rather than guessing at "busy".
+	jobState func() jobstate.State
 }
 
-// Runner statuses the agent can actually observe.
+// Runner statuses the agent reports.
 //
-// "busy" is missing on purpose: whether a job is running is GitHub's view,
-// and the agent would have to parse the runner's output to guess at it. The
-// control plane reports what it is told rather than something invented here.
+// "busy" comes from the job hooks, which the runner itself calls when a job
+// starts and finishes. Without them installed the agent cannot tell a runner
+// waiting for work from one flat out, and reports "online" rather than
+// inventing an answer.
 const (
 	statusStarting = "starting"
 	statusOnline   = "online"
+	statusBusy     = "busy"
 	statusStopping = "stopping"
 	statusOffline  = "offline"
 	statusError    = "error"
@@ -227,6 +234,16 @@ func (r *reporter) heartbeat() {
 	dropped := r.dropped
 	r.dropped = 0
 	r.mu.Unlock()
+
+	// A running job outranks "online": the process being up says nothing
+	// about whether it is doing anything. Only override a healthy status,
+	// so a runner that is stopping or has failed still reports that.
+	if r.jobState != nil && req.Status == statusOnline {
+		if job := r.jobState(); job.Running() {
+			req.Status = statusBusy
+			req.StatusDetail = job.Describe()
+		}
+	}
 
 	if dropped > 0 {
 		r.log.Warn("dropped events because the control plane was not keeping up",

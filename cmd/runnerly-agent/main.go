@@ -77,6 +77,17 @@ func run() int {
 		opts.Output = output
 	}
 
+	resolvedConfig := *configPath
+	if resolvedConfig == "" {
+		resolvedConfig = config.Path()
+	}
+	if cfg, _, err := config.Load(resolvedConfig); err == nil {
+		opts.Hooks, opts.ExtraEnv = agent.Configure(cfg, resolvedConfig)
+	} else {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
 	// Reporting is optional: an agent with no control plane configured still
 	// supervises its runner and logs what happens.
 	enrollment, err := connect(ctx, *configPath, runner, logger)

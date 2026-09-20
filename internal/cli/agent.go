@@ -33,6 +33,7 @@ func newAgentCommand(e *env) *cobra.Command {
 		newAgentRunCommand(e),
 		newAgentStatusCommand(e),
 		newAgentSystemdCommand(e),
+		newHookCommand(e),
 	)
 	return cmd
 }
@@ -93,6 +94,7 @@ func newAgentRunCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			opts.Hooks, opts.ExtraEnv = agent.Configure(cfg, configPath)
 			if serverURL := agent.ServerURLFrom(cfg.Server.URL); serverURL != "" {
 				enrollment, err := agent.Enroll(ctx, agent.EnrollOptions{
 					ServerURL:       serverURL,

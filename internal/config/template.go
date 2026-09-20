@@ -84,6 +84,19 @@ executor:
   # docker - the machine runs the runner with Docker available for
   #          containerized steps and job containers
   type: %s
+  docker:
+    # Overrides DOCKER_HOST for the runner, for a non-default socket or a
+    # rootless daemon. Empty uses Docker's own default.
+    host: ""
+    # What to do with containers, volumes and networks a job leaves behind:
+    # after_job or never. Only what appeared during the job is removed, so
+    # other containers on a shared machine are left alone.
+    cleanup: "%s"
+    # Also remove dangling images after a job. Off by default: it reclaims
+    # disk at the cost of re-pulling layers next time.
+    prune_images: %t
+    # Bounds each docker command the agent runs.
+    timeout: "%s"
 
 updates:
   # Whether Runnerly may upgrade itself and the GitHub runner unattended.
@@ -118,6 +131,9 @@ func Template() string {
 		cfg.Server.EventRetentionDays,
 		strings.TrimRight(labels.String(), "\n"),
 		cfg.Executor.Type,
+		cfg.Executor.Docker.Cleanup,
+		cfg.Executor.Docker.PruneImages,
+		cfg.Executor.Docker.Timeout,
 		cfg.Updates.Auto,
 		cfg.Security.AllowPublicRepositories,
 		cfg.Security.AllowForkWorkflows,
