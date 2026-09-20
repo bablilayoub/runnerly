@@ -102,6 +102,7 @@ The configuration changes what `doctor` checks:
 | --- | --- |
 | `executor.type: host` | the Docker checks are skipped |
 | `executor.type: docker` | a missing Docker CLI is a failure |
+| `runner.dir` | where `runner create` installs, plus the runner name |
 | `server.url: ""` | the control-plane check is skipped |
 | `server.url` set | `GET <url>/api/v1/health` must return 200 |
 | `github.host` | chooses the API endpoint that must be reachable |
@@ -112,6 +113,16 @@ The configuration changes what `doctor` checks:
 The GitHub token is **not** in this file. It lives in `credentials.yaml` beside
 it, written with mode 0600, and is managed with `runnerly login` and
 `runnerly logout`. See [github.md](github.md) and [security.md](security.md).
+
+## Installed runners
+
+Neither is the record of what is installed. `runners.yaml` sits beside this
+file and lists the runners on this machine: their names, scopes and
+directories. `runner create` writes it and `runner remove` prunes it, so
+nothing here is ever rewritten under you.
+
+It is why `runner list`, `runner remove` and the agent work without `--repo` on
+a machine with one runner. See [agent.md](agent.md).
 
 ## Not yet used
 

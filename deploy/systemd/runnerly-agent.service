@@ -1,0 +1,56 @@
+# Runnerly agent: keeps one GitHub Actions runner running on this machine.
+#
+# This file is a reference. Generate one filled in for your machine with:
+#
+#   runnerly agent systemd <name> --output runnerly-agent.service
+#
+# Placeholders to replace if you edit this by hand:
+#   RUNNER_NAME  the runner's name, as recorded in runners.yaml
+#   RUNNER_DIR   where the official runner was installed
+#
+# Install (these need root, which is why Runnerly does not run them for you):
+#
+#   sudo useradd --system --home RUNNER_DIR --shell /usr/sbin/nologin runnerly
+#   sudo chown -R runnerly:runnerly RUNNER_DIR
+#   sudo install -m 0644 runnerly-agent.service \
+#     /etc/systemd/system/runnerly-agent@RUNNER_NAME.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now runnerly-agent@RUNNER_NAME
+
+[Unit]
+Description=Runnerly agent for the RUNNER_NAME GitHub Actions runner
+Documentation=https://github.com/bablilayoub/runnerly
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Never root. A self-hosted runner executes workflow code, so it runs as a
+# dedicated account that owns nothing but its own runner directory.
+User=runnerly
+Group=runnerly
+WorkingDirectory=RUNNER_DIR
+ExecStart=/usr/local/bin/runnerly-agent --name RUNNER_NAME
+
+# The runner finishes the job it is on when it gets SIGTERM, so give it room
+# rather than cutting a build short on every restart.
+KillSignal=SIGTERM
+TimeoutStopSec=180
+
+# Two layers, and both are needed: the agent restarts a runner that crashes,
+# and systemd restarts an agent that crashes.
+Restart=always
+RestartSec=5
+
+# Cheap hardening that does not get in a runner's way. A runner legitimately
+# needs to write to its own directory and reach the network, so the rest of
+# the system is protected instead.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=RUNNER_DIR
+
+[Install]
+WantedBy=multi-user.target

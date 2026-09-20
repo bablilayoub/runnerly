@@ -18,11 +18,14 @@ const (
 )
 
 // Scope identifies where a runner lives.
+//
+// It carries yaml tags as well as json ones because Runnerly records the scope
+// of each installed runner on disk.
 type Scope struct {
-	Kind  ScopeKind `json:"kind"`
-	Owner string    `json:"owner"`
+	Kind  ScopeKind `json:"kind" yaml:"kind"`
+	Owner string    `json:"owner" yaml:"owner"`
 	// Repo is empty for an organization scope.
-	Repo string `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty" yaml:"repo,omitempty"`
 }
 
 // GitHub allows letters, digits and hyphens in an owner login, and adds

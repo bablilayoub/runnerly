@@ -72,7 +72,15 @@ struct of function fields so tests never touch the machine or the network:
 | --- | --- | --- |
 | `internal/doctor` | `doctor.Env` | fake `LookPath`, `Run`, `Dial`, HTTP client |
 | `internal/runner` | `runner.Env` | fake `Run`; an `httptest` server for downloads |
+| `internal/supervisor` | `supervisor.StartFunc` | a fake `Process` the test drives |
+| `internal/agent` | `agent.Options.Start` | the same fake, through the agent |
 | `internal/cli` | `env.newGitHubClient`, `env.runnerEnv` | a client pointed at `httptest` |
+
+The supervisor is tested both ways on purpose. Fakes cover the state machine —
+backoff, giving up, clearing history, the kill path — deterministically and
+fast. A second file, `process_unix_test.go`, runs real shell scripts: it starts
+one, kills it from outside, and checks the supervisor brings it back, which is
+the only way to know process groups and signals actually work.
 
 The CLI seams are why command tests exercise the real cobra tree: `newEnv` and
 `newRootCommand` are separate, so a test builds an environment, swaps the two

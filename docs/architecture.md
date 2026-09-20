@@ -29,14 +29,16 @@ and manages its lifecycle.
 
 | Component | Binary | State |
 | --- | --- | --- |
-| CLI | `runnerly` | doctor, config, auth, repo and runner commands implemented |
-| Runner agent | `runnerly-agent` | not implemented |
+| CLI | `runnerly` | doctor, config, auth, repo, runner and agent commands |
+| Runner agent | `runnerly-agent` | supervision, restart backoff, systemd |
 | Control plane | `runnerly-server` | not implemented |
 | Dashboard | web | not implemented |
 
-The CLI installs and registers runners today. Keeping them running is the
-agent's job and does not exist yet, which is why `runner create` stops after
-registration and tells you to start the process yourself.
+The agent has no control plane to enroll with or send heartbeats to, so it
+reports through structured logs on stdout. That is deliberate sequencing rather
+than a gap to paper over: a machine with a working, self-healing runner is
+useful on its own, and the enrollment protocol is easier to design once there
+is a server to design it against.
 
 The control plane is optional by design. The CLI must stay useful on a machine
 that has never seen a server — `doctor` skips server-dependent checks rather
@@ -46,16 +48,26 @@ than failing them.
 
 ```text
 cmd/runnerly/        CLI entry point; main() only
+cmd/runnerly-agent/  the daemon systemd runs
 internal/cli/        cobra command tree, flag parsing, exit codes
+internal/agent/      supervising one runner, and its structured logs
 internal/auth/       GitHub credential resolution and storage
 internal/config/     configuration schema, loading, validation
 internal/doctor/     machine diagnostics and their rendering
 internal/github/     a narrow GitHub REST client
 internal/runner/     installing and configuring actions/runner
+internal/state/      which runners are installed on this machine
+internal/supervisor/ keeping a child process alive
 internal/ui/         terminal output: symbols, color, tables, indentation
 internal/version/    build information, injected via -ldflags
+deploy/systemd/      a reference service unit
 docs/                this documentation
 ```
+
+`internal/supervisor` knows nothing about GitHub or runners — it supervises a
+command. `internal/agent` is the layer that knows one particular command is a
+GitHub runner. Keeping them apart is what lets the restart logic be tested
+against fake processes and, separately, against real ones.
 
 Rules that keep the layers honest:
 
@@ -84,6 +96,18 @@ or make HTTP calls.
 Each `Check` carries a `Detail` (what was found) and a `Remedy` (what to type).
 A failing check without a remedy is a bug.
 
+## Configuration and state are separate files
+
+`config.yaml` is what the operator asked for. `runners.yaml` is what Runnerly
+did: which runners exist here, where their files are, and which repository each
+belongs to.
+
+They are separate so that installing a runner never rewrites a hand-edited,
+commented configuration file, and so the agent has something to read that
+answers "what am I supervising?" without inferring it. It is also what lets
+`runner list`, `runner remove` and the agent work without `--repo` on a machine
+with one runner.
+
 ## Why the GitHub client is hand-written
 
 Two direct dependencies is the bar (see below), and Runnerly uses six GitHub
@@ -96,13 +120,11 @@ cannot see this", and saying that is worth more than forwarding "Not Found".
 
 Roughly in order:
 
-1. **Runner agent** — enrollment, heartbeat, runner supervision, restart with
-   exponential backoff, systemd unit. This is what turns a registered runner
-   into one that stays up.
-2. **Control plane** — Postgres-backed inventory, runner events, agent
-   endpoints, machine tokens.
-3. **Dashboard** — React and TypeScript, monochrome, minimal.
-4. **Docker executor**, then **ephemeral runners**.
+1. **Control plane** — Postgres-backed inventory, runner events, agent
+   endpoints, machine tokens. This is what agent enrollment and heartbeats
+   need, and neither can be designed honestly without it.
+2. **Dashboard** — React and TypeScript, monochrome, minimal.
+3. **Docker executor**, then **ephemeral runners**.
 
 Deliberately out of scope until the above is solid: Kubernetes, autoscaling,
 cloud provisioning, GPU scheduling, Windows and macOS runners, and local

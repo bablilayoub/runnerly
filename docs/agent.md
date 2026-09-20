@@ -1,0 +1,177 @@
+# The agent
+
+`runner create` registers a runner. The agent is what keeps it running.
+
+```text
+systemd
+   │  restarts the agent if the agent dies
+   ▼
+runnerly-agent
+   │  restarts the runner if the runner dies
+   ▼
+run.sh  →  Runner.Listener  →  your workflow jobs
+```
+
+Both layers are needed. The agent handles a runner that crashes; the service
+manager handles an agent that crashes.
+
+## Running it
+
+In the foreground, which is the easiest way to see what happens:
+
+```bash
+runnerly agent run
+```
+
+The name is optional on a machine with one runner. With several:
+
+```bash
+runnerly agent run runnerly-01
+```
+
+Stop it with Ctrl-C. The agent sends the runner SIGTERM, which lets it finish
+the job it is on, and waits before killing it.
+
+## What it does when the runner dies
+
+```text
+runner exits
+     ↓
+agent notices
+     ↓
+wait 5s  →  restart
+     ↓ still failing
+wait 10s →  restart
+     ↓
+20s, 40s, 80s
+     ↓ still failing
+give up, log runner_failed, exit non-zero
+```
+
+The agent stops rather than restarting forever, because a runner that cannot
+start is a problem to surface, not to hide. systemd then restarts the agent,
+which tries the whole schedule again — slowly enough not to hammer GitHub.
+
+A runner that stays up for a minute has its failure history cleared, so a
+machine that works for weeks is never one crash away from the end of its
+backoff.
+
+## Logs
+
+The agent writes structured logs on stdout and forwards the runner's own
+output to stderr. They are kept apart because the runner's output is not
+structured, and interleaving them would stop a collector parsing either.
+
+```bash
+runnerly agent run --log-format json
+runnerly agent run --log-level debug
+runnerly agent run --quiet-runner    # drop the runner's own output
+```
+
+```json
+{"time":"2026-09-20T03:23:39Z","level":"INFO","msg":"runner is running",
+ "component":"runner-agent","runner":"runnerly-01","scope":"acme/widgets",
+ "event":"runner_online","pid":9859}
+```
+
+Every line carries `time`, `level`, `component`, `runner` and `event`. Filter
+on `event` for a specific transition, or on `level` for anything wrong.
+
+| Event | Level | Meaning |
+| --- | --- | --- |
+| `agent_started` | INFO | the agent is up |
+| `runner_online` | INFO | the runner process is running |
+| `runner_exited` | WARN | the runner stopped when it should not have |
+| `runner_restarting` | WARN | waiting out the backoff |
+| `runner_healthy` | INFO | it stayed up long enough to clear its history |
+| `runner_failed` | ERROR | the agent gave up |
+| `runner_stopping` | INFO | a shutdown was asked for |
+| `runner_killed` | WARN | a graceful stop timed out |
+| `runner_offline` | INFO | the runner is gone |
+| `agent_stopped` | INFO | clean shutdown |
+
+**`runner_exited` is a warning even when the exit code is 0.** Killing the
+runner's listener makes `run.sh` exit 0, so a crash and a clean stop cannot be
+told apart by exit code. A runner meant to stay up should never exit at all,
+so any exit is worth your attention.
+
+## Running it as a service
+
+```bash
+runnerly agent systemd runnerly-01
+```
+
+That prints a unit for this machine. It installs nothing: putting a file in
+`/etc` and enabling a service needs root, and Runnerly does not take
+privileges you did not hand it. Read the unit, then run the commands it prints:
+
+```bash
+runnerly agent systemd runnerly-01 --output runnerly-agent.service
+sudo useradd --system --home <dir> --shell /usr/sbin/nologin runnerly
+sudo chown -R runnerly:runnerly <dir>
+sudo install -m 0644 runnerly-agent.service \
+  /etc/systemd/system/runnerly-agent@runnerly-01.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now runnerly-agent@runnerly-01
+journalctl -u runnerly-agent@runnerly-01 -f
+```
+
+The unit runs as a dedicated `runnerly` user, never root. Change it with
+`--user` and `--group`. A reference copy lives in
+[`deploy/systemd/runnerly-agent.service`](../deploy/systemd/runnerly-agent.service).
+
+`TimeoutStopSec` defaults to three minutes so a job in flight has a chance to
+finish on stop. Raise it with `--stop-timeout` if your jobs run longer.
+
+## What is installed here
+
+```bash
+runnerly agent status
+```
+
+```text
+NAME         SCOPE          READY  DIRECTORY
+runnerly-01  acme/widgets   yes    /home/me/.local/share/runnerly/runners/runnerly-01
+```
+
+This reads local state only and never contacts GitHub, so it answers a
+different question from `runnerly runner list`, which reports what GitHub has
+registered. A runner can be `READY` here and offline there, which just means
+nothing is running it.
+
+`READY no` comes with the reason — usually a missing `.runner`, meaning the
+directory was never registered, or a directory that has been deleted.
+
+## Where state lives
+
+`runners.yaml`, beside `config.yaml`:
+
+```yaml
+runners:
+  runnerly-01:
+    name: runnerly-01
+    scope: {kind: repository, owner: acme, repo: widgets}
+    host: github.com
+    dir: /home/me/.local/share/runnerly/runners/runnerly-01
+    labels: [self-hosted, linux, x64, docker]
+    installed_at: 2026-09-20T03:23:21Z
+```
+
+It is what the operator asked for, separately from `config.yaml`, which is
+what they configured. Keeping them apart means installing a runner never
+rewrites a hand-edited file, and it is why `runner list`, `runner remove` and
+the agent no longer need `--repo` on a machine that has one runner.
+
+It holds no secrets. The runner's own credentials are written by GitHub's
+`config.sh` inside the runner directory, and Runnerly never copies them.
+
+## Not implemented
+
+- **Enrollment and heartbeats.** The plan defines both, but there is no
+  Runnerly control plane to send them to. The agent reports through logs.
+- **Ephemeral lifecycle.** `--ephemeral` is passed to `config.sh` and the agent
+  stops on a clean exit, but nothing re-creates the runner afterwards, and
+  nothing preserves its logs. A crashed ephemeral runner also exits 0, so it is
+  indistinguishable from one that finished its job — the agent treats it as
+  finished and stops.
+- **Upgrades.** Neither the agent nor the runner updates itself.

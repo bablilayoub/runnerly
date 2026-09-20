@@ -93,5 +93,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: runnerly-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/runnerly
+          path: |
+            dist/runnerly
+            dist/runnerly-agent
           if-no-files-found: error

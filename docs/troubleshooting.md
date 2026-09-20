@@ -201,6 +201,93 @@ Runnerly does not supervise runner processes yet:
 cd ~/.local/share/runnerly/runners/<name> && ./run.sh
 ```
 
+## The agent says the runner is not installed
+
+```text
+Error: no runner is installed on this machine.
+Install one with `runnerly runner create`
+```
+
+The agent reads `runners.yaml` beside your configuration. Either nothing has
+been installed here, or you are pointing at a different config:
+
+```bash
+runnerly config path
+runnerly agent status
+```
+
+A runner registered from another machine, or created before Runnerly recorded
+state, will not appear. Re-register it here with
+`runnerly runner create --name <name> --replace`.
+
+## The agent refuses: no configured runner
+
+```text
+Error: /home/me/.local/share/runnerly/runners/runnerly-01 holds no configured
+runner.
+```
+
+`config.sh` writes `.runner` when registration succeeds, and it is missing. The
+directory was unpacked but never registered, or someone cleaned it out:
+
+```bash
+runnerly runner create --name runnerly-01 --replace
+```
+
+## The agent gave up
+
+```text
+{"level":"ERROR","event":"runner_failed","attempts":5}
+```
+
+The runner failed five times in a row, so the agent stopped rather than hiding
+a runner that cannot start. Look at the runner's own output — the agent
+forwards it to stderr — and at `_diag/` inside the runner directory.
+
+Common causes: the registration was deleted in GitHub while the runner was
+still installed, the machine lost network access, or the runner directory lost
+its permissions. After fixing it:
+
+```bash
+runnerly agent run          # or: sudo systemctl restart runnerly-agent@<name>
+```
+
+## A runner shows offline in GitHub while the agent is running
+
+`runner list` reports GitHub's view; `agent status` reports this machine's.
+A runner shows offline when nothing has connected it, so check the agent is
+actually up and look for `runner_online` in its log:
+
+```bash
+runnerly agent status
+journalctl -u runnerly-agent@<name> -n 50
+```
+
+## Jobs are not picked up
+
+The labels must match. `runner create` registers the platform labels GitHub's
+runner would apply plus your own, so check what was actually registered:
+
+```bash
+runnerly runner list
+```
+
+then make `runs-on` a subset of that. Note GitHub normalizes some label casing:
+`arm64` is stored as `ARM64`. Matching is case-insensitive, so this affects
+what you see, not what runs.
+
+## Stopping the agent leaves the runner running
+
+It should not: the agent puts the runner in its own process group and signals
+the whole group. If you see orphans, check you signalled the agent itself and
+not a wrapping shell:
+
+```bash
+pgrep -fl runnerly-agent
+```
+
+Under systemd, `systemctl stop` handles this correctly.
+
 ## Reporting a bug
 
 Include:

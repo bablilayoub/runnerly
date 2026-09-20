@@ -15,6 +15,7 @@ import (
 	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/github"
 	"github.com/bablilayoub/runnerly/internal/runner"
+	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/ui"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
@@ -126,33 +127,64 @@ func (s *scopeFlags) register(cmd *cobra.Command) {
 	cmd.MarkFlagsMutuallyExclusive("repo", "org")
 }
 
-// resolve turns the flags plus the configuration into a scope.
-func (s *scopeFlags) resolve(cfg config.Config) (github.Scope, error) {
+// statePath returns the installed-runner record beside the configuration.
+func (e *env) statePath() string {
+	return state.Path(e.resolvedConfigPath())
+}
+
+// resolveScope decides which repository or organization a command acts on.
+//
+// Order, most specific first:
+//
+//  1. an explicit --repo or --org
+//  2. the recorded scope of the named runner, if it is installed here
+//  3. github.repository or github.organization in the configuration
+//  4. the only runner installed on this machine
+//
+// Steps 2 and 4 exist because a machine that installed a runner already knows
+// where it belongs, and asking for --repo again on a single-runner host is
+// busywork.
+func (e *env) resolveScope(flags scopeFlags, cfg config.Config, runnerName string) (github.Scope, error) {
 	switch {
-	case s.repo != "":
-		return github.ParseRepository(s.repo)
-	case s.org != "":
-		scope := github.ForOrganization(s.org)
+	case flags.repo != "":
+		return github.ParseRepository(flags.repo)
+	case flags.org != "":
+		scope := github.ForOrganization(flags.org)
 		return scope, scope.Validate()
+	}
+
+	if runnerName != "" {
+		if recorded, err := state.Get(e.statePath(), runnerName); err == nil {
+			return recorded.Scope, recorded.Scope.Validate()
+		}
 	}
 
 	switch cfg.GitHub.Scope {
 	case config.ScopeOrganization:
-		if cfg.GitHub.Organization == "" {
-			return github.Scope{}, errors.New(
-				"github.scope is organization but github.organization is empty.\n" +
-					"Set it in the configuration, or pass --org")
+		if cfg.GitHub.Organization != "" {
+			scope := github.ForOrganization(cfg.GitHub.Organization)
+			return scope, scope.Validate()
 		}
-		scope := github.ForOrganization(cfg.GitHub.Organization)
-		return scope, scope.Validate()
 	default:
-		if cfg.GitHub.Repository == "" {
-			return github.Scope{}, errors.New(
-				"no repository or organization was given.\n" +
-					"Pass --repo owner/repo, or set github.repository in the configuration")
+		if cfg.GitHub.Repository != "" {
+			return github.ParseRepository(cfg.GitHub.Repository)
 		}
-		return github.ParseRepository(cfg.GitHub.Repository)
 	}
+
+	// Fall back to the machine's own runner, but only when there is exactly
+	// one: guessing between several would act on the wrong repository.
+	if only, err := state.Only(e.statePath()); err == nil {
+		return only.Scope, only.Scope.Validate()
+	}
+
+	if cfg.GitHub.Scope == config.ScopeOrganization {
+		return github.Scope{}, errors.New(
+			"github.scope is organization but github.organization is empty.\n" +
+				"Set it in the configuration, or pass --org")
+	}
+	return github.Scope{}, errors.New(
+		"no repository or organization was given.\n" +
+			"Pass --repo owner/repo, or set github.repository in the configuration")
 }
 
 // confirm asks the operator to approve an action that cannot be undone from
@@ -214,6 +246,7 @@ func newRootCommand(e *env) *cobra.Command {
 		newAuthCommand(e),
 		newRepoCommand(e),
 		newRunnerCommand(e),
+		newAgentCommand(e),
 	)
 	return root
 }

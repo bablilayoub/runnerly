@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/bablilayoub/runnerly/internal/github"
+	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/ui"
 )
 
@@ -50,7 +53,7 @@ func newRunnerListCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			target, err := scope.resolve(cfg)
+			target, err := e.resolveScope(scope, cfg, "")
 			if err != nil {
 				return err
 			}
@@ -108,7 +111,7 @@ func newRunnerStatusCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			target, err := scope.resolve(cfg)
+			target, err := e.resolveScope(scope, cfg, args[0])
 			if err != nil {
 				return err
 			}
@@ -147,6 +150,7 @@ func newRunnerRemoveCommand(e *env) *cobra.Command {
 	var (
 		scope     scopeFlags
 		id        int64
+		purge     bool
 		assumeYes bool
 	)
 
@@ -154,10 +158,12 @@ func newRunnerRemoveCommand(e *env) *cobra.Command {
 		Use:     "remove [name]",
 		Aliases: []string{"rm", "delete"},
 		Short:   "Remove a runner's registration from GitHub",
-		Long: "remove deletes a runner's registration from GitHub.\n\n" +
-			"It does not stop a runner process that is still running on a machine, and it\n" +
-			"does not delete anything from that machine. A still-running runner whose\n" +
-			"registration has been removed will fail to reconnect.",
+		Long: "remove deletes a runner's registration from GitHub and forgets the runner\n" +
+			"on this machine.\n\n" +
+			"It does not stop a runner process that is still running, and by default it\n" +
+			"leaves the installed files alone. A still-running runner whose registration\n" +
+			"has been removed will fail to reconnect.\n\n" +
+			"Pass --purge to delete the install directory too.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && id == 0 {
@@ -167,30 +173,55 @@ func newRunnerRemoveCommand(e *env) *cobra.Command {
 				return errors.New("pass a name or --id, not both")
 			}
 
+			var name string
+			if len(args) == 1 {
+				name = args[0]
+			}
+
 			client, cfg, _, err := e.githubClient()
 			if err != nil {
 				return err
 			}
-			target, err := scope.resolve(cfg)
+			target, err := e.resolveScope(scope, cfg, name)
 			if err != nil {
 				return err
 			}
 
+			// A runner recorded here tells us where its files are, which is
+			// what makes --purge possible.
+			installed, installedErr := state.Get(e.statePath(), name)
+			known := name != "" && installedErr == nil
+
 			label := "runner " + strconv.FormatInt(id, 10)
-			if len(args) == 1 {
-				runner, err := client.FindRunnerByName(cmd.Context(), target, args[0])
-				if err != nil {
-					return describeRunnerLookup(err, target, args[0])
+			registered := true
+			if name != "" {
+				found, findErr := client.FindRunnerByName(cmd.Context(), target, name)
+				switch {
+				case findErr == nil:
+					id, label = found.ID, found.Name
+				case errors.Is(findErr, github.ErrRunnerNotFound) && known:
+					// GitHub has already forgotten it, but this machine has
+					// not. Cleaning up the local record is still worth doing.
+					registered = false
+					label = name
+				default:
+					return describeRunnerLookup(findErr, target, name)
 				}
-				id, label = runner.ID, runner.Name
 			}
 
 			p := e.printer()
+			action := fmt.Sprintf("Remove %s from %s?", label, target)
+			if !registered {
+				action = fmt.Sprintf("%s is not registered with %s any more. Forget it on this machine?", label, target)
+			}
+			if purge && known {
+				action = strings.TrimSuffix(action, "?") + fmt.Sprintf(" This also deletes %s.", installed.Dir)
+			}
+
 			if !assumeYes {
-				ok, err := confirm(e.in, e.out, e.interactive,
-					fmt.Sprintf("Remove %s from %s?", label, target))
-				if err != nil {
-					return err
+				ok, confirmErr := confirm(e.in, e.out, e.interactive, action)
+				if confirmErr != nil {
+					return confirmErr
 				}
 				if !ok {
 					p.Skip("nothing was removed")
@@ -198,17 +229,48 @@ func newRunnerRemoveCommand(e *env) *cobra.Command {
 				}
 			}
 
-			if err := client.DeleteRunner(cmd.Context(), target, id); err != nil {
-				return err
+			if registered {
+				if err := client.DeleteRunner(cmd.Context(), target, id); err != nil {
+					return err
+				}
+				p.Pass("removed %s from %s", label, target)
+			} else {
+				p.Skip("%s was already gone from %s", label, target)
 			}
-			p.Pass("removed %s from %s", label, target)
-			p.Detail("If the runner is still running on a machine, stop it there too.")
+
+			if name != "" {
+				forgotten, stateErr := state.Delete(e.statePath(), name)
+				if stateErr != nil {
+					return stateErr
+				}
+				if forgotten {
+					p.Detail("Forgot it in " + e.statePath())
+				}
+			}
+
+			switch {
+			case purge && known:
+				if err := os.RemoveAll(installed.Dir); err != nil {
+					return fmt.Errorf("delete %s: %w", installed.Dir, err)
+				}
+				p.Detail("Deleted " + installed.Dir)
+			case purge:
+				p.Warn("nothing to purge: this machine has no record of %s", label)
+			case known:
+				p.Detail("The installed runner is still at " + installed.Dir + "\n" +
+					"Delete it with: rm -rf " + installed.Dir)
+			}
+
+			if registered {
+				p.Detail("If the runner is still running, stop it there too.")
+			}
 			return nil
 		},
 	}
 
 	scope.register(cmd)
 	cmd.Flags().Int64Var(&id, "id", 0, "remove by GitHub runner ID instead of name")
+	cmd.Flags().BoolVar(&purge, "purge", false, "also delete the runner's install directory")
 	cmd.Flags().BoolVar(&assumeYes, "yes", false, "do not ask for confirmation")
 	return cmd
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/github"
 	"github.com/bablilayoub/runnerly/internal/runner"
+	"github.com/bablilayoub/runnerly/internal/state"
 )
 
 func newRunnerCreateCommand(e *env) *cobra.Command {
@@ -44,13 +45,12 @@ func newRunnerCreateCommand(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			target, err := scope.resolve(cfg)
-			if err != nil {
-				return err
-			}
-
 			if name == "" {
 				name = defaultRunnerName(cfg)
+			}
+			target, err := e.resolveScope(scope, cfg, name)
+			if err != nil {
+				return err
 			}
 			if err := validateRunnerName(name); err != nil {
 				return err
@@ -92,6 +92,24 @@ func newRunnerCreateCommand(e *env) *cobra.Command {
 				return err
 			}
 
+			// Record what was installed so later commands, and the agent, do
+			// not need the scope spelled out again.
+			record := state.Runner{
+				Name:      name,
+				Scope:     target,
+				Host:      cfg.GitHub.Host,
+				Dir:       result.Dir,
+				Labels:    result.Labels,
+				Ephemeral: ephemeral,
+				Release:   result.Filename,
+			}
+			if err := state.Put(e.statePath(), record); err != nil {
+				// The runner is registered and working; failing the command
+				// now would be misleading. Say what was missed instead.
+				p.Warn("could not record the runner on this machine: %v", err)
+				p.Detail("Later commands will need --repo or --org.")
+			}
+
 			p.Println()
 			p.Pass("%s is registered with %s", name, target)
 			p.Println()
@@ -101,10 +119,10 @@ func newRunnerCreateCommand(e *env) *cobra.Command {
 			p.Println("  dir     ", result.Dir)
 			p.Println()
 			p.Println("Start it:")
-			p.Println("  cd " + result.Dir + " && ./run.sh")
+			p.Println("  runnerly agent run " + name)
 			p.Println()
-			p.Dim("Runnerly does not supervise the runner process yet. Until the agent ships,")
-			p.Dim("run it yourself or install a service for it.")
+			p.Println("Or install it as a service:")
+			p.Println("  runnerly agent systemd " + name)
 			return nil
 		},
 	}

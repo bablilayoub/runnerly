@@ -11,6 +11,7 @@ import (
 
 	"github.com/bablilayoub/runnerly/internal/github"
 	"github.com/bablilayoub/runnerly/internal/runner"
+	"github.com/bablilayoub/runnerly/internal/state"
 )
 
 // withRunnerEnv replaces the machine-facing half of installation, so no
@@ -113,16 +114,57 @@ func TestRunnerCreateRegistersAPrivateRepository(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"runnerly-01 is registered", "acme/widgets", "./run.sh"} {
+	for _, want := range []string{
+		"runnerly-01 is registered",
+		"acme/widgets",
+		"runnerly agent run runnerly-01",
+		"runnerly agent systemd runnerly-01",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "does not supervise") {
-		t.Errorf("output should say the runner is not supervised yet:\n%s", out)
-	}
 	if strings.Contains(out, "AREGTOKEN") {
 		t.Errorf("the registration token leaked into the output:\n%s", out)
+	}
+
+	// The install is recorded, so later commands need no --repo.
+	recorded, err := state.Get(state.Path(cfg), "runnerly-01")
+	if err != nil {
+		t.Fatalf("the runner was not recorded: %v", err)
+	}
+	if recorded.Scope.String() != "acme/widgets" {
+		t.Errorf("recorded scope = %q", recorded.Scope)
+	}
+	if recorded.Dir != dir {
+		t.Errorf("recorded dir = %q, want %q", recorded.Dir, dir)
+	}
+	if strings.Join(recorded.Labels, ",") != "self-hosted,linux,x64,docker" {
+		t.Errorf("recorded labels = %v", recorded.Labels)
+	}
+}
+
+func TestRecordedRunnerRemovesTheNeedForRepoFlag(t *testing.T) {
+	cfg := configIn(t, "github:\n  repository: acme/widgets\n")
+	dir := preUnpacked(t)
+
+	var commands []string
+	opts := []option{withGitHub(t, createHandler(t, true)), withRunnerEnv(&commands)}
+	if _, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"runner", "create", "--name", "solo", "--dir", dir); err != nil {
+		t.Fatalf("runner create: %v", err)
+	}
+
+	// A configuration with no repository at all: the scope must come from the
+	// recorded runner.
+	bare := filepath.Join(filepath.Dir(cfg), "bare.yaml")
+	if err := os.WriteFile(bare, []byte("github:\n  host: github.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := []option{withGitHub(t, runnersHandler(t, "/repos/acme/widgets/actions/runners", twoRunners))}
+	if _, _, err := runCLI(t, listed, "--config", bare, "--token", "t", "runner", "list"); err != nil {
+		t.Fatalf("runner list without --repo: %v", err)
 	}
 }
 

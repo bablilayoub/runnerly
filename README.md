@@ -33,12 +33,14 @@ runner running.
 | `runnerly login` / `logout` / `auth status` | works |
 | `runnerly repo list` | works |
 | `runnerly runner create` / `list` / `status` / `remove` | works |
-| Starting and supervising the runner process | not implemented |
-| Automatic recovery, upgrades, ephemeral lifecycle | not implemented |
+| `runnerly agent run` / `status` / `systemd` | works |
+| Automatic restart with backoff, systemd service | works |
+| Upgrades and ephemeral lifecycle | not implemented |
 | Control plane, heartbeats, dashboard | not implemented |
 
-`runner create` registers a runner; you start it yourself for now. See
-[docs/architecture.md](docs/architecture.md) for where this is going.
+A runner installed here stays up: the agent restarts it when it fails, and
+systemd restarts the agent. See [docs/architecture.md](docs/architecture.md)
+for where this is going.
 
 ## Try it
 
@@ -57,6 +59,7 @@ Then point it at a repository:
 echo "$GITHUB_TOKEN" | runnerly login --with-token
 runnerly repo list
 runnerly runner create --repo owner/repo
+runnerly agent run
 ```
 
 ```text
@@ -74,7 +77,7 @@ Registering runnerly-01
   dir      /home/me/.local/share/runnerly/runners/runnerly-01
 
 Start it:
-  cd /home/me/.local/share/runnerly/runners/runnerly-01 && ./run.sh
+  runnerly agent run runnerly-01
 ```
 
 The archive is checked against the SHA-256 checksum GitHub publishes with it
@@ -106,12 +109,26 @@ Runnerly Doctor
 It exits non-zero when a check fails, so it works in a provisioning script.
 `--json` gives machine-readable output, and `--offline` skips network checks.
 
+## Keeping it running
+
+```bash
+runnerly agent run              # foreground, restarts the runner if it fails
+runnerly agent status           # what is installed on this machine
+runnerly agent systemd          # print a service unit; installs nothing itself
+```
+
+The agent restarts a failed runner on a 5s, 10s, 20s, 40s, 80s backoff and then
+stops rather than hiding a runner that cannot start. systemd restarts the
+agent. Logs are structured JSON on stdout.
+
+Details in [docs/agent.md](docs/agent.md).
+
 ## Runners
 
 ```bash
 runnerly runner list
 runnerly runner status runnerly-01
-runnerly runner remove runnerly-01
+runnerly runner remove runnerly-01 --purge
 ```
 
 Labels map straight to GitHub's, so a workflow reaches the runner the usual way:
@@ -152,6 +169,7 @@ directory.
 - [Installation](docs/installation.md)
 - [GitHub integration](docs/github.md)
 - [Runners](docs/runners.md)
+- [The agent](docs/agent.md)
 - [Configuration](docs/configuration.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

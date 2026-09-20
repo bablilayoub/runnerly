@@ -19,11 +19,13 @@ retires runners so you do not do those steps by hand.
 - `runnerly repo list` — finds repositories you can attach a runner to
 - `runnerly runner create` — installs and registers a real runner
 - `runnerly runner list` / `status` / `remove` — manages registrations
+- `runnerly agent run` — supervises the runner and restarts it when it fails
+- `runnerly agent systemd` — prints a service unit for running it at boot
 - `runnerly config` — creates and inspects the configuration file
 - `runnerly version` — build information
 
-Runnerly does not yet start or supervise the runner process. After
-`runner create`, you run `./run.sh` yourself. See
+Runnerly does not yet talk to a control plane; there is no server to enroll
+with. The agent reports through structured logs. See
 [architecture.md](architecture.md) for the plan.
 
 ## Install
@@ -113,11 +115,24 @@ runnerly runner create --repo owner/repo
 
 Runnerly asks GitHub for a short-lived registration token, downloads the runner
 release GitHub expects, verifies its checksum, unpacks it, and registers it.
-Then start it:
+
+## Keep it running
 
 ```bash
-cd ~/.local/share/runnerly/runners/<name> && ./run.sh
+runnerly agent run
 ```
+
+The agent starts the runner and restarts it if it fails, backing off 5s, 10s,
+20s, 40s, 80s. Ctrl-C stops both cleanly, giving the runner a chance to finish
+the job it is on.
+
+To run it at boot, generate a systemd unit and install it yourself:
+
+```bash
+runnerly agent systemd --output runnerly-agent.service
+```
+
+See [agent.md](agent.md) for the install commands and what the unit does.
 
 Push a workflow that targets it:
 
@@ -137,6 +152,7 @@ Runnerly refuses to register against a public repository by default. Read
 
 - [GitHub integration](github.md)
 - [Runners](runners.md)
+- [The agent](agent.md)
 - [Configuration](configuration.md)
 - [Security model](security.md) — read this before pointing a runner at a public repository
 - [Troubleshooting](troubleshooting.md)
