@@ -144,6 +144,18 @@ These are commitments about Runnerly's own behavior.
 Some of these describe components that do not exist yet. They are stated here
 so the design is fixed before the code is written, not after.
 
+## In production
+
+TLS, rate limiting, credential rotation and the audit trail are covered in
+[operations.md](operations.md). The short version:
+
+- Put TLS in front of the control plane, or configure `server.tls`. Machine
+  tokens are bearer credentials.
+- Leave `trust_forwarded_for` off unless a proxy you control sets the header.
+- Set `server.oauth.allowed_logins`, or anyone who completes GitHub sign-in
+  gets in.
+- Back up the secret key with your other secrets; it is not in the database.
+
 ## Reporting a problem
 
 See [SECURITY.md](../SECURITY.md).

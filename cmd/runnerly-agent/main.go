@@ -81,12 +81,12 @@ func run() int {
 	if resolvedConfig == "" {
 		resolvedConfig = config.Path()
 	}
-	if cfg, _, err := config.Load(resolvedConfig); err == nil {
-		opts.Hooks, opts.ExtraEnv = agent.Configure(cfg, resolvedConfig)
-	} else {
+	cfg, _, err := config.Load(resolvedConfig)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
+	opts.Hooks, opts.ExtraEnv = agent.Configure(cfg, resolvedConfig)
 
 	// Reporting is optional: an agent with no control plane configured still
 	// supervises its runner and logs what happens.
@@ -98,6 +98,8 @@ func run() int {
 	if enrollment != nil {
 		opts.ControlPlane = enrollment.Client
 		opts.HeartbeatInterval = enrollment.Interval
+		opts.OnMachineToken = agent.PersistMachineToken(
+			auth.Path(resolvedConfig), agent.ServerURLFrom(cfg.Server.URL), enrollment.RunnerID)
 	}
 
 	if _, err := agent.Run(ctx, opts); err != nil {

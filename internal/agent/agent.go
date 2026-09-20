@@ -63,6 +63,12 @@ type Options struct {
 	// ExtraEnv is added to the runner's environment, for DOCKER_HOST and
 	// anything else the executor needs.
 	ExtraEnv []string
+	// OnMachineToken persists a credential the control plane rotated.
+	//
+	// Nil means a rotated token is used for the rest of this run but not
+	// written down, so the next start would find a credential that no
+	// longer works and have to enroll again.
+	OnMachineToken func(token string) error
 }
 
 // HookOptions describes the job hooks to install.
@@ -149,6 +155,7 @@ func Run(ctx context.Context, opts Options) (Outcome, error) {
 		if opts.Hooks.Install {
 			report.jobState = readJob
 		}
+		report.onToken = opts.OnMachineToken
 	}
 
 	onEvent := func(e supervisor.Event) {

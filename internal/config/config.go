@@ -98,9 +98,58 @@ type Server struct {
 	SecretKey string    `yaml:"secret_key"`
 	OAuth     OAuth     `yaml:"oauth"`
 	Heartbeat Heartbeat `yaml:"heartbeat"`
+	TLS       TLS       `yaml:"tls"`
+	RateLimit RateLimit `yaml:"rate_limit"`
+	Metrics   Metrics   `yaml:"metrics"`
 	// EventRetentionDays bounds how long the event feed keeps history. The
 	// control plane is not a log platform.
 	EventRetentionDays int `yaml:"event_retention_days"`
+	// TokenLifetime is how long an agent uses a machine token before the
+	// server hands it a replacement. Zero uses the default of 24h.
+	//
+	// Rotation bounds how long a leaked credential is worth anything. It is
+	// not a substitute for revoking one you know has leaked.
+	TokenLifetime Duration `yaml:"token_lifetime"`
+}
+
+// TLS serves the API over HTTPS directly.
+//
+// Terminating TLS in a reverse proxy is the more common deployment and
+// stays supported; this is for the case where there is nothing in front.
+type TLS struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+}
+
+// Enabled reports whether the server should serve HTTPS itself.
+func (t TLS) Enabled() bool { return t.CertFile != "" && t.KeyFile != "" }
+
+// RateLimit bounds how fast one client can call the API.
+//
+// The limits are per client address and per minute. Enrollment and sign-in
+// get their own, much stricter, because they are the endpoints where
+// guessing is worth an attacker's time.
+type RateLimit struct {
+	// Requests is the general allowance. Zero disables limiting entirely.
+	Requests int `yaml:"requests_per_minute"`
+	// Auth covers enrollment and sign-in.
+	Auth int `yaml:"auth_requests_per_minute"`
+	// TrustForwardedFor reads the client address from X-Forwarded-For.
+	//
+	// Off by default, and it must stay off unless a proxy you control sets
+	// that header: anyone can send it, so trusting it lets a client pick
+	// its own rate limit bucket.
+	TrustForwardedFor bool `yaml:"trust_forwarded_for"`
+}
+
+// Metrics configures the Prometheus endpoint.
+type Metrics struct {
+	// Enabled serves /metrics.
+	Enabled bool `yaml:"enabled"`
+	// Token, when set, is required as a bearer token to scrape. Empty
+	// leaves the endpoint open, which is normal on a private network and is
+	// why the server binds to loopback by default.
+	Token string `yaml:"token"`
 }
 
 // OAuth configures GitHub sign-in for the dashboard.
@@ -217,7 +266,10 @@ func Default() Config {
 			// An empty slice rather than nil, so the documented
 			// `allowed_logins: []` in the template round-trips to exactly
 			// these defaults.
-			OAuth: OAuth{AllowedLogins: []string{}},
+			OAuth:         OAuth{AllowedLogins: []string{}},
+			Metrics:       Metrics{Enabled: true},
+			TokenLifetime: Duration(24 * time.Hour),
+			RateLimit:     RateLimit{Requests: 600, Auth: 20},
 			Heartbeat: Heartbeat{
 				Interval:     Duration(20 * time.Second),
 				StaleAfter:   Duration(30 * time.Second),
@@ -472,6 +524,16 @@ func Validate(cfg Config) error {
 	}
 	if cfg.Server.EventRetentionDays < 0 {
 		return errors.New("server.event_retention_days: must not be negative")
+	}
+
+	if cfg.Server.TokenLifetime < 0 {
+		return errors.New("server.token_lifetime: must not be negative (0 uses the default)")
+	}
+	if cfg.Server.RateLimit.Requests < 0 || cfg.Server.RateLimit.Auth < 0 {
+		return errors.New("server.rate_limit: rates must not be negative (0 disables limiting)")
+	}
+	if (cfg.Server.TLS.CertFile == "") != (cfg.Server.TLS.KeyFile == "") {
+		return errors.New("server.tls: set both cert_file and key_file, or neither")
 	}
 
 	if cfg.Ephemeral.KeepRuns < 0 {

@@ -148,6 +148,8 @@ a `hint` saying what to do.
 | `GET /runners/{id}/commands` | session | that runner's recent commands |
 | `POST /agent/commands/{id}/result` | machine token | report a command's outcome |
 | `GET /auth/config` | none | whether sign-in is available |
+| `GET /audit` | session | the audit trail |
+| `GET /metrics` | optional token | Prometheus metrics |
 | `GET /events` | session | the event feed |
 | `GET /enrollment-tokens` | session | list tokens |
 | `POST /enrollment-tokens` | session | issue a token |
@@ -193,11 +195,14 @@ server:
 
 Expired sessions are pruned on the same schedule.
 
+## Hardening
+
+TLS, rate limiting, metrics, credential rotation, backups and the audit
+trail are covered in [operations.md](operations.md).
+
 ## What is not implemented
 
-- **Upgrade commands.** `POST /runners/{id}/upgrade` is in the plan. The
-  command channel now exists to carry it; deciding what an unattended runner
-  upgrade should do is the missing part.
-- **TLS in the server itself.** Terminate it in front.
+- **Automatic upgrades.** `runnerly upgrade` reports and applies them on
+  request; doing it unattended needs a maintenance window to be safe.
 - **Multi-tenancy.** Every signed-in user sees every runner. The allow list is
   the only access control.

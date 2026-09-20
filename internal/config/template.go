@@ -51,6 +51,29 @@ server:
   # How long the event feed keeps history. The control plane is not a log
   # platform.
   event_retention_days: %d
+  # How long an agent uses a machine token before the server replaces it.
+  # Rotation bounds how long a leaked credential is worth anything.
+  token_lifetime: "%s"
+  tls:
+    # Serve HTTPS directly. Leave both empty to terminate TLS in a reverse
+    # proxy, which is the more common deployment.
+    cert_file: ""
+    key_file: ""
+  rate_limit:
+    # Per client address, per minute. 0 disables limiting.
+    requests_per_minute: %d
+    # Enrollment and sign-in, where guessing is worth an attacker's time.
+    auth_requests_per_minute: %d
+    # Read the client address from X-Forwarded-For. Only turn this on
+    # behind a proxy you control: anyone can send that header, so trusting
+    # it lets a client choose its own rate limit bucket.
+    trust_forwarded_for: false
+  metrics:
+    # Serve Prometheus metrics at /metrics.
+    enabled: %t
+    # Require this as a bearer token to scrape. Empty leaves it open, which
+    # is normal on a private network.
+    token: ""
 
 ephemeral:
   # One-job runners. See docs/ephemeral-runners.md.
@@ -141,6 +164,10 @@ func Template() string {
 		cfg.Server.Heartbeat.StaleAfter,
 		cfg.Server.Heartbeat.OfflineAfter,
 		cfg.Server.EventRetentionDays,
+		cfg.Server.TokenLifetime,
+		cfg.Server.RateLimit.Requests,
+		cfg.Server.RateLimit.Auth,
+		cfg.Server.Metrics.Enabled,
 		cfg.Ephemeral.KeepRuns,
 		strings.TrimRight(labels.String(), "\n"),
 		cfg.Executor.Type,

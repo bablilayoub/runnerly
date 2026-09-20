@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1112,5 +1113,251 @@ func TestRetireNeedsAMachineToken(t *testing.T) {
 	session := h.signIn("octocat")
 	if rec := h.do(http.MethodPost, "/api/v1/agent/retire", RetireRequest{}, session); rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401: a session is not a machine", rec.Code)
+	}
+}
+
+func TestRateLimitRefusesAFloodAndSaysWhenToRetry(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.RateLimit = RateLimitOptions{RequestsPerMinute: 3}
+	})
+
+	for i := 1; i <= 3; i++ {
+		if rec := h.do(http.MethodGet, "/api/v1/health", nil); rec.Code != http.StatusOK {
+			t.Fatalf("request %d = %d, want 200 inside the allowance", i, rec.Code)
+		}
+	}
+
+	rec := h.do(http.MethodGet, "/api/v1/health", nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	// Without Retry-After a client reads the refusal as "now" and comes
+	// straight back.
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("no Retry-After header")
+	}
+	if e := decodeError(t, rec); e.Error != "rate_limited" || e.Hint == "" {
+		t.Errorf("error = %+v", e)
+	}
+}
+
+func TestEnrollmentHasItsOwnStricterLimit(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		// Generous in general, strict where guessing a token pays off.
+		o.RateLimit = RateLimitOptions{RequestsPerMinute: 1000, AuthPerMinute: 2}
+	})
+
+	body := RegisterRequest{Name: "x", GitHubScope: store.ScopeRepository, GitHubScopeID: "a/b"}
+	for i := 1; i <= 2; i++ {
+		rec := h.do(http.MethodPost, "/api/v1/agent/register", body, withBearer("rnr_enroll_guess"))
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was limited too early", i)
+		}
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/agent/register", body, withBearer("rnr_enroll_guess")); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429 on the third guess", rec.Code)
+	}
+
+	// The general allowance is untouched, so ordinary traffic still works.
+	if rec := h.do(http.MethodGet, "/api/v1/health", nil); rec.Code != http.StatusOK {
+		t.Errorf("health = %d; the strict limiter leaked into everything", rec.Code)
+	}
+}
+
+func TestRateLimitingIsOffWhenNotConfigured(t *testing.T) {
+	h := newHarness(t)
+	for i := range 50 {
+		if rec := h.do(http.MethodGet, "/api/v1/health", nil); rec.Code != http.StatusOK {
+			t.Fatalf("request %d = %d with limiting disabled", i, rec.Code)
+		}
+	}
+}
+
+func TestForwardedForIsIgnoredUnlessTrusted(t *testing.T) {
+	// Anyone can send X-Forwarded-For. Believing it by default would let a
+	// client pick a fresh bucket for every request.
+	h := newHarness(t, func(o *Options) {
+		o.RateLimit = RateLimitOptions{RequestsPerMinute: 2}
+	})
+
+	spoof := func(r *http.Request) { r.Header.Set("X-Forwarded-For", randomIP(t)) }
+	h.do(http.MethodGet, "/api/v1/health", nil, spoof)
+	h.do(http.MethodGet, "/api/v1/health", nil, spoof)
+
+	if rec := h.do(http.MethodGet, "/api/v1/health", nil, spoof); rec.Code != http.StatusTooManyRequests {
+		t.Error("a spoofed X-Forwarded-For got around the rate limit")
+	}
+}
+
+func TestForwardedForIsUsedWhenTrusted(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.RateLimit = RateLimitOptions{RequestsPerMinute: 2, TrustForwardedFor: true}
+	})
+
+	from := func(ip string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set("X-Forwarded-For", ip+", 10.0.0.1") }
+	}
+	h.do(http.MethodGet, "/api/v1/health", nil, from("203.0.113.1"))
+	h.do(http.MethodGet, "/api/v1/health", nil, from("203.0.113.1"))
+
+	if rec := h.do(http.MethodGet, "/api/v1/health", nil, from("203.0.113.1")); rec.Code != http.StatusTooManyRequests {
+		t.Error("the first address in X-Forwarded-For was not used as the key")
+	}
+	// A different client behind the same proxy is unaffected.
+	if rec := h.do(http.MethodGet, "/api/v1/health", nil, from("203.0.113.2")); rec.Code != http.StatusOK {
+		t.Errorf("status = %d; one client behind the proxy limited another", rec.Code)
+	}
+}
+
+func randomIP(t *testing.T) string {
+	t.Helper()
+	// Distinct per call, which is the point: a real attacker would vary it.
+	return "198.51.100." + strconv.Itoa(1+len(t.Name())%200)
+}
+
+func TestMetricsExposeWhatThePlanAsksFor(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.Metrics = MetricsOptions{Enabled: true} })
+	machineToken, _ := h.enroll("runnerly-01")
+
+	if rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{Status: store.StatusOnline}, withBearer(machineToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/agent/events", EventsRequest{Events: []AgentEvent{
+		{Event: "runner_restarting", Severity: store.SeverityWarn},
+		{Event: "runner_failed", Severity: store.SeverityError},
+	}}, withBearer(machineToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	h.server.RefreshMetrics(context.Background())
+
+	rec := h.do(http.MethodGet, "/metrics", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"runnerly_runners_total 1",
+		"runnerly_runners_online 1",
+		"runnerly_runner_heartbeats_total 1",
+		"runnerly_runner_restarts_total 1",
+		"runnerly_agent_errors_total 1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestMetricsCanBeDisabledOrGated(t *testing.T) {
+	off := newHarness(t, func(o *Options) { o.Metrics = MetricsOptions{Enabled: false} })
+	if rec := off.do(http.MethodGet, "/metrics", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when metrics are off", rec.Code)
+	}
+
+	gated := newHarness(t, func(o *Options) {
+		o.Metrics = MetricsOptions{Enabled: true, Token: "scrape-me"}
+	})
+	if rec := gated.do(http.MethodGet, "/metrics", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 without the token", rec.Code)
+	}
+	if rec := gated.do(http.MethodGet, "/metrics", nil, withBearer("wrong")); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 with the wrong token", rec.Code)
+	}
+	if rec := gated.do(http.MethodGet, "/metrics", nil, withBearer("scrape-me")); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 with the token", rec.Code)
+	}
+}
+
+func TestMachineTokenIsRotatedWhenItIsOldEnough(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		// Anything that has existed at all is old enough here.
+		o.TokenLifetime = time.Nanosecond
+	})
+	machineToken, _ := h.enroll("runnerly-01")
+
+	rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{Status: store.StatusOnline}, withBearer(machineToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	var beat HeartbeatResponse
+	decode(t, rec, &beat)
+	if beat.MachineToken == "" {
+		t.Fatal("no replacement credential was issued")
+	}
+	if beat.MachineToken == machineToken {
+		t.Fatal("the same token came back")
+	}
+
+	// The old one stops working the moment the new one exists, so an agent
+	// that ignored the rotation would break rather than linger.
+	if rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{}, withBearer(machineToken)); rec.Code != http.StatusUnauthorized {
+		t.Errorf("the old token still works: %d", rec.Code)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{}, withBearer(beat.MachineToken)); rec.Code != http.StatusOK {
+		t.Errorf("the new token does not work: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAFreshTokenIsNotRotated(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.TokenLifetime = time.Hour })
+	machineToken, _ := h.enroll("runnerly-01")
+
+	rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat", HeartbeatRequest{}, withBearer(machineToken))
+	var beat HeartbeatResponse
+	decode(t, rec, &beat)
+
+	if beat.MachineToken != "" {
+		t.Error("a credential minutes old was rotated; that is churn, not security")
+	}
+}
+
+func TestAuditTrailIsReadable(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	_, runner := h.enroll("runnerly-01")
+
+	// Two actions that are recorded.
+	if rec := h.do(http.MethodPost, "/api/v1/runners/"+runner.ID+"/restart", nil, session); rec.Code != http.StatusAccepted {
+		t.Fatal(rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/enrollment-tokens",
+		CreateEnrollmentTokenRequest{Description: "audit"}, session); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+
+	rec := h.do(http.MethodGet, "/api/v1/audit", nil, session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var audit AuditResponse
+	decode(t, rec, &audit)
+
+	actions := map[string]bool{}
+	for _, e := range audit.Entries {
+		actions[e.Action] = true
+		if e.Actor != "octocat" {
+			t.Errorf("actor = %q, want the signed-in user", e.Actor)
+		}
+	}
+	for _, want := range []string{"runner.restart", "enrollment_token.create"} {
+		if !actions[want] {
+			t.Errorf("no %q in the audit trail: %+v", want, audit.Entries)
+		}
+	}
+}
+
+func TestAuditTrailNeedsASession(t *testing.T) {
+	h := newHarness(t)
+	if rec := h.do(http.MethodGet, "/api/v1/audit", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }

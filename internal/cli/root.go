@@ -258,6 +258,7 @@ func newRootCommand(e *env) *cobra.Command {
 		newAgentCommand(e),
 		newServerCommand(e),
 		newEphemeralCommand(e),
+		newUpgradeCommand(e),
 	)
 	return root
 }

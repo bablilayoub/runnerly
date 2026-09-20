@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	gotls "crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,6 +37,8 @@ const (
 	// This is the name of an environment variable, not a secret.
 	envClientSecret = "RUNNERLY_OAUTH_CLIENT_SECRET" //nolint:gosec // G101 false positive
 	envListen       = "RUNNERLY_LISTEN"
+	// This is the name of an environment variable, not a secret.
+	envMetricsToken = "RUNNERLY_METRICS_TOKEN" //nolint:gosec // G101 false positive
 )
 
 // shutdownGrace is how long in-flight requests get to finish on stop.
@@ -148,6 +151,16 @@ func run() int {
 		PublicURL:         cfg.Server.URL,
 		Thresholds:        thresholds(cfg),
 		HeartbeatInterval: cfg.Server.Heartbeat.Interval.Duration(),
+		TokenLifetime:     cfg.Server.TokenLifetime.Duration(),
+		RateLimit: server.RateLimitOptions{
+			RequestsPerMinute: cfg.Server.RateLimit.Requests,
+			AuthPerMinute:     cfg.Server.RateLimit.Auth,
+			TrustForwardedFor: cfg.Server.RateLimit.TrustForwardedFor,
+		},
+		Metrics: server.MetricsOptions{
+			Enabled: cfg.Server.Metrics.Enabled,
+			Token:   firstNonEmpty(os.Getenv(envMetricsToken), cfg.Server.Metrics.Token),
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -175,11 +188,34 @@ func run() int {
 	}
 
 	go housekeeping(ctx, db, log, cfg.Server.EventRetentionDays)
+	go srv.RunBackground(ctx)
+
+	tls := cfg.Server.TLS
+	if tls.Enabled() {
+		// Modern ciphers only. An operator serving TLS directly has no
+		// proxy to set a policy for them.
+		httpServer.TLSConfig = &gotls.Config{MinVersion: gotls.VersionTLS12}
+	} else if cfg.Server.URL != "" && !strings.HasPrefix(cfg.Server.URL, "https://") {
+		log.Warn("serving plain HTTP: machine tokens are bearer credentials and anyone on the path can read them",
+			"event", "no_tls",
+			"hint", "set server.tls, or terminate TLS in a proxy and make server.url https")
+	}
 
 	errs := make(chan error, 1)
 	go func() {
-		log.Info("listening", "event", "server_started", "address", address, "version", version.Get().Short())
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Info("listening",
+			"event", "server_started",
+			"address", address,
+			"tls", tls.Enabled(),
+			"version", version.Get().Short())
+
+		var err error
+		if tls.Enabled() {
+			err = httpServer.ListenAndServeTLS(tls.CertFile, tls.KeyFile)
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 		}
 	}()

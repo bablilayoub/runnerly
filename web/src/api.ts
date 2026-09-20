@@ -1,4 +1,12 @@
-import type { Command, EnrollmentToken, Overview, Runner, RunnerEvent, User } from './types'
+import type {
+  AuditEntry,
+  Command,
+  EnrollmentToken,
+  Overview,
+  Runner,
+  RunnerEvent,
+  User,
+} from './types'
 
 /** ApiError carries what the server said, including its hint. */
 export class ApiError extends Error {
@@ -91,6 +99,8 @@ export const api = {
     const suffix = query.toString() ? `?${query}` : ''
     return request<{ events: RunnerEvent[] }>(`/events${suffix}`)
   },
+
+  audit: (limit = 100) => request<{ entries: AuditEntry[] }>(`/audit?limit=${limit}`),
 
   enrollmentTokens: () => request<{ tokens: EnrollmentToken[] }>('/enrollment-tokens'),
   createEnrollmentToken: (body: {

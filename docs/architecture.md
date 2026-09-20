@@ -58,6 +58,8 @@ internal/docker/     preparing and tidying the Docker environment
 internal/jobstate/   what the runner is doing, via GitHub's job hooks
 internal/doctor/     machine diagnostics and their rendering
 internal/github/     a narrow GitHub REST client
+internal/metrics/    the Prometheus registry and text format
+internal/ratelimit/  per-client token buckets
 internal/runner/     installing and configuring actions/runner
 internal/secret/     encrypting credentials the server must read back
 internal/server/     the control plane's HTTP API
@@ -115,6 +117,16 @@ commented configuration file, and so the agent has something to read that
 answers "what am I supervising?" without inferring it. It is also what lets
 `runner list`, `runner remove` and the agent work without `--repo` on a machine
 with one runner.
+
+## Why the metrics registry is hand-written
+
+The plan asks for five counters and gauges and says not to build an
+observability stack. Prometheus' text format is a few lines per metric; its
+client library would be the largest dependency in the project.
+
+The trade is real and named in the code: no histograms, so no request
+duration percentiles from Prometheus. Those are in the structured logs. If
+percentiles become the thing someone needs, the library earns its place then.
 
 ## Why a retired runner is not an offline one
 

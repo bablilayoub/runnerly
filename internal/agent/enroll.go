@@ -52,6 +52,20 @@ const EnrollmentTokenEnvVar = "RUNNERLY_ENROLLMENT_TOKEN"
 // ServerURLEnvVar overrides the configured control plane.
 const ServerURLEnvVar = "RUNNERLY_SERVER_URL"
 
+// PersistMachineToken returns a function that stores a rotated credential
+// where enrollment put the first one.
+//
+// Every entry point uses it, so none of them can forget and quietly leave a
+// machine re-enrolling on each start.
+func PersistMachineToken(credentialsPath, serverURL, runnerID string) func(string) error {
+	return func(token string) error {
+		return auth.StoreMachine(credentialsPath, serverURL, auth.Machine{
+			RunnerID: runnerID,
+			Token:    token,
+		})
+	}
+}
+
 // EnrollmentTokenFrom prefers the environment over the configuration, the
 // same way the GitHub token does, so a provisioning script can inject one
 // without editing a file.

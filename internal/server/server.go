@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bablilayoub/runnerly/internal/metrics"
+	"github.com/bablilayoub/runnerly/internal/ratelimit"
 	"github.com/bablilayoub/runnerly/internal/secret"
 	"github.com/bablilayoub/runnerly/internal/store"
 	"github.com/bablilayoub/runnerly/internal/version"
@@ -51,11 +53,36 @@ type Options struct {
 	Thresholds store.Thresholds
 	// HeartbeatInterval is what the server tells agents to use.
 	HeartbeatInterval time.Duration
+	// TokenLifetime is how long a machine token is used before the server
+	// issues a replacement. Zero uses the store's default.
+	TokenLifetime time.Duration
 	// HTTPClient is used for GitHub calls during sign-in.
 	HTTPClient *http.Client
+	// RateLimit bounds how fast one client address may call. Zero values
+	// disable that limiter.
+	RateLimit RateLimitOptions
+	// Metrics controls the Prometheus endpoint.
+	Metrics MetricsOptions
 	// Now is the clock, injectable so tests can age a heartbeat without
 	// waiting.
 	Now func() time.Time
+}
+
+// RateLimitOptions configures the limiters.
+type RateLimitOptions struct {
+	// RequestsPerMinute is the general allowance per client address.
+	RequestsPerMinute int
+	// AuthPerMinute covers enrollment and sign-in.
+	AuthPerMinute int
+	// TrustForwardedFor reads the client address from X-Forwarded-For.
+	TrustForwardedFor bool
+}
+
+// MetricsOptions configures the Prometheus endpoint.
+type MetricsOptions struct {
+	Enabled bool
+	// Token, when set, is required to scrape.
+	Token string
 }
 
 // Server serves the control plane API.
@@ -67,10 +94,26 @@ type Server struct {
 	publicURL         string
 	thresholds        store.Thresholds
 	heartbeatInterval time.Duration
+	tokenLifetime     time.Duration
 	httpClient        *http.Client
 	now               func() time.Time
 	secureCookies     bool
 	handler           http.Handler
+
+	metrics        *metrics.Registry
+	metricsEnabled bool
+	metricsToken   string
+	fleet          fleetSnapshot
+
+	heartbeats  *metrics.CounterVec
+	restarts    *metrics.CounterVec
+	agentErrors *metrics.CounterVec
+	requests    *metrics.CounterVec
+	rateLimited *metrics.CounterVec
+
+	general           *ratelimit.Limiter
+	auth              *ratelimit.Limiter
+	trustForwardedFor bool
 }
 
 // New builds a Server.
@@ -105,13 +148,26 @@ func New(opts Options) (*Server, error) {
 		publicURL:         strings.TrimRight(opts.PublicURL, "/"),
 		thresholds:        opts.Thresholds,
 		heartbeatInterval: opts.HeartbeatInterval,
+		tokenLifetime:     opts.TokenLifetime,
 		httpClient:        opts.HTTPClient,
 		now:               opts.Now,
 		// Cookies are only marked Secure when the server is actually served
 		// over HTTPS; setting it on a plain-HTTP dev server would silently
 		// stop sign-in working with no clue why.
-		secureCookies: strings.HasPrefix(opts.PublicURL, "https://"),
+		secureCookies:     strings.HasPrefix(opts.PublicURL, "https://"),
+		metricsEnabled:    opts.Metrics.Enabled,
+		metricsToken:      opts.Metrics.Token,
+		trustForwardedFor: opts.RateLimit.TrustForwardedFor,
 	}
+
+	if opts.RateLimit.RequestsPerMinute > 0 {
+		s.general = ratelimit.New(ratelimit.PerMinute(opts.RateLimit.RequestsPerMinute))
+	}
+	if opts.RateLimit.AuthPerMinute > 0 {
+		s.auth = ratelimit.New(ratelimit.PerMinute(opts.RateLimit.AuthPerMinute))
+	}
+
+	s.registerMetrics()
 	s.handler = s.routes()
 
 	// Session cookies over plain HTTP to anything but loopback are readable
@@ -163,10 +219,16 @@ func (s *Server) routes() http.Handler {
 	// Unauthenticated: a health check that needs a credential is useless to
 	// a load balancer.
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	// A scrape endpoint behind a session is useless to Prometheus.
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	// Agents. Enrollment carries an enrollment token; everything after it
 	// carries the machine token enrollment returned.
-	mux.HandleFunc("POST /api/v1/agent/register", s.handleAgentRegister)
+	// Enrollment is rate limited hard: it is where guessing a token is
+	// worth an attacker's time, and each attempt is cheap for them and not
+	// for the database.
+	mux.Handle("POST /api/v1/agent/register",
+		s.withRateLimit(s.auth, http.HandlerFunc(s.handleAgentRegister)))
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", s.requireMachine(s.handleAgentHeartbeat))
 	mux.HandleFunc("POST /api/v1/agent/events", s.requireMachine(s.handleAgentEvents))
 	mux.HandleFunc("GET /api/v1/agent/config", s.requireMachine(s.handleAgentConfig))
@@ -175,8 +237,11 @@ func (s *Server) routes() http.Handler {
 
 	// Dashboard sign-in.
 	mux.HandleFunc("GET /api/v1/auth/config", s.handleAuthConfig)
-	mux.HandleFunc("GET /api/v1/auth/github", s.handleAuthStart)
-	mux.HandleFunc("GET /api/v1/auth/github/callback", s.handleAuthCallback)
+	// Sign-in is limited for the same reason as enrollment.
+	mux.Handle("GET /api/v1/auth/github",
+		s.withRateLimit(s.auth, http.HandlerFunc(s.handleAuthStart)))
+	mux.Handle("GET /api/v1/auth/github/callback",
+		s.withRateLimit(s.auth, http.HandlerFunc(s.handleAuthCallback)))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("GET /api/v1/auth/session", s.requireUser(s.handleAuthSession))
 
@@ -188,6 +253,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/runners/{id}/restart", s.requireUser(s.handleRestartRunner))
 	mux.HandleFunc("GET /api/v1/runners/{id}/commands", s.requireUser(s.handleListCommands))
 	mux.HandleFunc("GET /api/v1/events", s.requireUser(s.handleListEvents))
+	mux.HandleFunc("GET /api/v1/audit", s.requireUser(s.handleListAudit))
 
 	// Enrollment tokens are operator tools, so they need a signed-in user.
 	mux.HandleFunc("GET /api/v1/enrollment-tokens", s.requireUser(s.handleListEnrollmentTokens))
@@ -199,7 +265,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/", s.handleNotFound)
 	mux.Handle("/", web.Handler())
 
-	return s.withRecovery(s.withRequestLog(mux))
+	// The general limiter wraps everything, including the endpoints with
+	// their own stricter one: a caller hammering enrollment should also
+	// count against its overall allowance.
+	return s.withRecovery(s.withRequestLog(s.withRateLimit(s.general, mux)))
 }
 
 func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +310,7 @@ func (s *Server) withRequestLog(next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r)
 
+		s.requests.Inc(statusClass(recorder.status))
 		s.logger.Info("request",
 			"component", Component,
 			"event", "http_request",

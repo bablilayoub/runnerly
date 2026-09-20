@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // NewEvent is something to record about a runner.
@@ -146,6 +147,43 @@ func (s *Store) PruneEvents(ctx context.Context, days int) (int64, error) {
 		return 0, fmt.Errorf("prune events: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// AuditEntry is one recorded operator action.
+type AuditEntry struct {
+	ID        int64          `json:"id"`
+	Actor     string         `json:"actor"`
+	Action    string         `json:"action"`
+	Target    string         `json:"target,omitempty"`
+	Detail    map[string]any `json:"detail,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// ListAudit returns recorded actions, newest first.
+//
+// Writing an audit trail nothing can read is security theater, which is
+// what this table was until it had a way out.
+func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
+	if limit <= 0 {
+		limit = DefaultListLimit
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, actor, action, target, detail, created_at
+		FROM audit_logs ORDER BY id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list audit entries: %w", err)
+	}
+	defer rows.Close()
+
+	out := []AuditEntry{}
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.ID, &e.Actor, &e.Action, &e.Target, &e.Detail, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list audit entries: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, wrap(rows.Err())
 }
 
 // RecordAudit stores an operator action.

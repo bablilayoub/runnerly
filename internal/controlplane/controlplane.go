@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,9 +30,13 @@ const maxResponseBody = 1 << 20
 // Client talks to a Runnerly control plane.
 type Client struct {
 	baseURL    string
-	token      string
 	httpClient *http.Client
 	userAgent  string
+
+	// mu guards the token, which the server can rotate under a running
+	// agent.
+	mu    sync.RWMutex
+	token string
 }
 
 // Option customizes a Client.
@@ -176,13 +181,38 @@ type HeartbeatResponse struct {
 	Runner   Runner           `json:"runner"`
 	Config   Config           `json:"config"`
 	Commands []PendingCommand `json:"commands,omitempty"`
+	// MachineToken is a replacement credential. When present, the agent
+	// must store it and use it from now on; the old one has already
+	// stopped working.
+	MachineToken string `json:"machine_token,omitempty"`
+}
+
+// UseToken replaces the credential this client sends.
+func (c *Client) UseToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = token
+}
+
+// Token returns the credential currently in use.
+func (c *Client) Token() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token
 }
 
 // Heartbeat reports the agent's state.
+//
+// When the server rotates the credential, the client starts using the new
+// one immediately: the old one stopped working the moment the new one was
+// issued, so the next request would fail otherwise.
 func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) (*HeartbeatResponse, error) {
 	var out HeartbeatResponse
-	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/heartbeat", c.token, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/heartbeat", c.Token(), req, &out); err != nil {
 		return nil, err
+	}
+	if out.MachineToken != "" {
+		c.UseToken(out.MachineToken)
 	}
 	return &out, nil
 }
@@ -209,7 +239,7 @@ func (c *Client) SendEvents(ctx context.Context, events []Event) (int, error) {
 		return 0, nil
 	}
 	var out eventsResponse
-	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/events", c.token, eventsRequest{Events: events}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent/events", c.Token(), eventsRequest{Events: events}, &out); err != nil {
 		return 0, err
 	}
 	return out.Stored, nil
@@ -222,7 +252,7 @@ func (c *Client) CompleteCommand(ctx context.Context, id, failure string) error 
 		Error string `json:"error"`
 	}{Error: failure}
 	return c.do(ctx, http.MethodPost, "/api/v1/agent/commands/"+url.PathEscape(id)+"/result",
-		c.token, body, nil)
+		c.Token(), body, nil)
 }
 
 // Retire tells the control plane this runner has finished for good.
@@ -233,7 +263,7 @@ func (c *Client) Retire(ctx context.Context, reason string) error {
 	body := struct {
 		Reason string `json:"reason"`
 	}{Reason: reason}
-	return c.do(ctx, http.MethodPost, "/api/v1/agent/retire", c.token, body, nil)
+	return c.do(ctx, http.MethodPost, "/api/v1/agent/retire", c.Token(), body, nil)
 }
 
 // Health checks that the control plane is reachable. It needs no credential.

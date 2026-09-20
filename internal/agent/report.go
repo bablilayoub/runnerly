@@ -44,6 +44,11 @@ type reporter struct {
 	// job hooks installed and cannot tell, in which case it reports what it
 	// does know rather than guessing at "busy".
 	jobState func() jobstate.State
+	// onToken persists a credential the control plane rotated.
+	onToken func(string) error
+	// lastToken is what was persisted, so the same rotation is not written
+	// on every heartbeat.
+	lastToken string
 }
 
 // Runner statuses the agent reports.
@@ -255,6 +260,7 @@ func (r *reporter) heartbeat() {
 
 	resp, err := r.client.Heartbeat(ctx, req)
 	if err == nil {
+		r.persistToken(resp.MachineToken)
 		r.runCommands(resp.Commands)
 		return
 	}
@@ -269,6 +275,27 @@ func (r *reporter) heartbeat() {
 		r.log.Warn("could not send a heartbeat",
 			"event", "report_failed", "error", err.Error())
 	}
+}
+
+// persistToken writes down a credential the control plane rotated.
+//
+// The client is already using it by the time this runs. Failing to store it
+// is worth a warning rather than an error: this run keeps working, and the
+// next start re-enrolls.
+func (r *reporter) persistToken(token string) {
+	if token == "" || r.onToken == nil || token == r.lastToken {
+		return
+	}
+	r.lastToken = token
+
+	if err := r.onToken(token); err != nil {
+		r.log.Warn("the control plane rotated this machine's credential but it could not be stored",
+			"event", "token_store_failed",
+			"error", err.Error(),
+			"hint", "this run continues; the next start will have to enroll again")
+		return
+	}
+	r.log.Info("stored a rotated machine credential", "event", "token_rotated")
 }
 
 // runCommands carries out what the control plane asked for and reports each

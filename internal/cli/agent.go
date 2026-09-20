@@ -109,6 +109,8 @@ func newAgentRunCommand(e *env) *cobra.Command {
 				if enrollment != nil {
 					opts.ControlPlane = enrollment.Client
 					opts.HeartbeatInterval = enrollment.Interval
+					opts.OnMachineToken = agent.PersistMachineToken(
+						auth.Path(configPath), serverURL, enrollment.RunnerID)
 				}
 			}
 

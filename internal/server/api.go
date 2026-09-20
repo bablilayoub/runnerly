@@ -235,6 +235,24 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, r, http.StatusOK, EventsListResponse{Events: events})
 }
 
+// AuditResponse is the audit trail.
+type AuditResponse struct {
+	Entries []store.AuditEntry `json:"entries"`
+}
+
+func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
+	limit, ok := s.intQuery(w, r, "limit", 0)
+	if !ok {
+		return
+	}
+	entries, err := s.store.ListAudit(r.Context(), limit)
+	if err != nil {
+		s.failInternal(w, r, err, "list audit entries")
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, AuditResponse{Entries: entries})
+}
+
 // CreateEnrollmentTokenRequest asks for a new enrollment token.
 type CreateEnrollmentTokenRequest struct {
 	Description string `json:"description"`

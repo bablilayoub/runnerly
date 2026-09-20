@@ -100,3 +100,12 @@ export interface EnrollmentToken {
   revoked_at?: string
   created_at: string
 }
+
+export interface AuditEntry {
+  id: number
+  actor: string
+  action: string
+  target?: string
+  detail?: Record<string, unknown>
+  created_at: string
+}

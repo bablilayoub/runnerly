@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -68,6 +69,32 @@ func MissingScope(kind ScopeKind, have []string) string {
 		}
 	}
 	return want
+}
+
+// ErrNoRelease means the repository has published none.
+var ErrNoRelease = errors.New("no releases have been published")
+
+// LatestRelease returns the tag of a repository's newest release.
+//
+// GitHub answers 404 when a repository has never published one, which is
+// not the same as the repository being missing; the caller needs to tell
+// those apart to say "nothing to compare against" rather than "not found".
+func (c *Client) LatestRelease(ctx context.Context, owner, repo string) (string, error) {
+	var release struct {
+		TagName string `json:"tag_name"`
+		Draft   bool   `json:"draft"`
+	}
+	path := "repos/" + owner + "/" + repo + "/releases/latest"
+	if _, err := c.do(ctx, http.MethodGet, path, nil, &release); err != nil {
+		if IsNotFound(err) {
+			return "", ErrNoRelease
+		}
+		return "", fmt.Errorf("look up the latest release of %s/%s: %w", owner, repo, err)
+	}
+	if release.TagName == "" {
+		return "", ErrNoRelease
+	}
+	return release.TagName, nil
 }
 
 // Repository looks up a single repository.

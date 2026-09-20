@@ -208,6 +208,53 @@ func (s *Store) AuthenticateMachine(ctx context.Context, token string) (Runner, 
 	return s.Runner(ctx, runnerID)
 }
 
+// DefaultTokenLifetime is how long a machine token is used before the
+// server hands out a replacement.
+//
+// Rotation limits how long a leaked credential is worth anything. It is not
+// a substitute for revoking one you know has leaked.
+const DefaultTokenLifetime = 24 * time.Hour
+
+// RotateMachineTokenIfOld issues a replacement when the runner's current
+// credential is older than maxAge, and reports whether it did.
+//
+// The caller hands the new token to the agent, which stores it and uses it
+// from then on. The old one is revoked in the same transaction as the new
+// one is created, so there is never a moment with two live credentials or
+// none.
+func (s *Store) RotateMachineTokenIfOld(ctx context.Context, runnerID string, maxAge time.Duration) (string, bool, error) {
+	if maxAge <= 0 {
+		maxAge = DefaultTokenLifetime
+	}
+
+	var age time.Duration
+	var seconds float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXTRACT(EPOCH FROM (now() - created_at))
+		FROM machine_tokens
+		WHERE runner_id = $1 AND revoked_at IS NULL
+		ORDER BY created_at DESC LIMIT 1`, runnerID).Scan(&seconds)
+	if err != nil {
+		if errors.Is(wrap(err), ErrNotFound) {
+			// No live credential. Authentication would already have failed,
+			// so there is nothing to rotate.
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("check the machine token age: %w", err)
+	}
+
+	age = time.Duration(seconds * float64(time.Second))
+	if age < maxAge {
+		return "", false, nil
+	}
+
+	token, err := s.IssueMachineToken(ctx, runnerID)
+	if err != nil {
+		return "", false, err
+	}
+	return token, true, nil
+}
+
 // RevokeMachineTokens invalidates every credential a runner holds.
 func (s *Store) RevokeMachineTokens(ctx context.Context, runnerID string) error {
 	if _, err := s.pool.Exec(ctx,

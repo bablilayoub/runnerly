@@ -9,6 +9,7 @@ import type { EnrollmentToken, User } from '../types'
 
 export function Settings({ user }: { user: User }) {
   const tokens = useLoad(() => api.enrollmentTokens())
+  const audit = useLoad(() => api.audit())
   const now = useNow()
 
   const [secret, setSecret] = useState<string>()
@@ -127,6 +128,30 @@ runnerly agent run`}
                 </Row>
               )
             })}
+          </Table>
+        )}
+      </Card>
+
+      <Card title="Audit trail">
+        {audit.initial ? (
+          <Spinner />
+        ) : audit.error ? (
+          <Failure error={audit.error} />
+        ) : (audit.data?.entries.length ?? 0) === 0 ? (
+          <Empty
+            title="Nothing recorded yet"
+            hint="Removing a runner, asking for a restart and issuing a token are all recorded here."
+          />
+        ) : (
+          <Table head={['When', 'Who', 'Action', 'Target']}>
+            {audit.data!.entries.map((entry) => (
+              <Row key={entry.id}>
+                <Cell muted>{relativeTime(entry.created_at, now)}</Cell>
+                <Cell>{entry.actor}</Cell>
+                <Cell mono>{entry.action}</Cell>
+                <Cell muted>{orDash(entry.target)}</Cell>
+              </Row>
+            ))}
           </Table>
         )}
       </Card>

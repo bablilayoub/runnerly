@@ -157,6 +157,10 @@ type HeartbeatResponse struct {
 	Runner   store.Runner     `json:"runner"`
 	Config   AgentConfig      `json:"config"`
 	Commands []PendingCommand `json:"commands,omitempty"`
+	// MachineToken is a replacement credential, sent when the current one
+	// is old enough to rotate. The agent stores it and uses it from the
+	// next request; the previous one stops working immediately.
+	MachineToken string `json:"machine_token,omitempty"`
 }
 
 func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +190,8 @@ func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.heartbeats.Inc("")
+
 	commands, err := s.store.TakeCommands(r.Context(), runner.ID)
 	if err != nil {
 		// The heartbeat itself worked; failing it now would make the runner
@@ -199,10 +205,34 @@ func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		pending = append(pending, PendingCommand{ID: c.ID, Command: c.Command})
 	}
 
+	// Rotate the credential if it has been in use long enough, so a leaked
+	// token is worth something for a day rather than for ever.
+	rotated, didRotate, err := s.store.RotateMachineTokenIfOld(r.Context(), runner.ID, s.tokenLifetime)
+	if err != nil {
+		// The heartbeat itself worked. Failing it over a rotation problem
+		// would make the runner look offline.
+		s.log(r).Warn("could not rotate the machine token",
+			"event", "rotation_failed", "error", err.Error())
+	}
+	if didRotate {
+		s.log(r).Info("rotated the machine token",
+			"event", "token_rotated", "runner", runner.Name)
+		if _, err := s.store.RecordEvent(r.Context(), store.NewEvent{
+			RunnerID: runner.ID,
+			Event:    "machine_token_rotated",
+			Severity: store.SeverityInfo,
+			Message:  "the agent was issued a new credential",
+		}); err != nil {
+			s.log(r).Warn("could not record the rotation event",
+				"event", "event_write_failed", "error", err.Error())
+		}
+	}
+
 	s.writeJSON(w, r, http.StatusOK, HeartbeatResponse{
-		Runner:   updated,
-		Config:   s.agentConfig(),
-		Commands: pending,
+		Runner:       updated,
+		Config:       s.agentConfig(),
+		Commands:     pending,
+		MachineToken: rotated,
 	})
 }
 
@@ -280,6 +310,17 @@ func (s *Server) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 			Message:  e.Message,
 			Data:     e.Data,
 		})
+	}
+
+	// Count what the agents are telling us before storing it, so the
+	// metrics reflect what was reported even if the write fails.
+	for _, e := range batch {
+		switch {
+		case e.Severity == store.SeverityError:
+			s.agentErrors.Inc("")
+		case e.Event == "runner_restarting":
+			s.restarts.Inc("")
+		}
 	}
 
 	stored, err := s.store.RecordEvents(r.Context(), batch)

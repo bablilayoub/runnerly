@@ -381,6 +381,8 @@ func (e *env) superviseEphemeral(ctx context.Context, cfg config.Config, configP
 		} else if enrollment != nil {
 			opts.ControlPlane = enrollment.Client
 			opts.HeartbeatInterval = enrollment.Interval
+			opts.OnMachineToken = agent.PersistMachineToken(
+				auth.Path(configPath), serverURL, enrollment.RunnerID)
 		}
 	}
 
@@ -474,6 +476,24 @@ var ephemeralLeftovers = []string{
 	".credentials_rsa",
 	"_work",
 	jobstate.Dir,
+}
+
+// removeUnpackedRunner deletes the runner binaries so the next install
+// fetches the current release. It keeps the directory itself.
+func removeUnpackedRunner(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // destroyRunnerState removes a runner's identity and working directory,
