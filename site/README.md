@@ -56,10 +56,9 @@ path. One copy, so the two can never show different marks.
 
 | File | Where it is used |
 | --- | --- |
-| `runnerly-logo.png` | the full lockup, white — the site's header and footer, and the README on a dark theme |
+| `runnerly-logo.png` | the full lockup, white — the site's header, its footer, the giant one across the bottom of the footer, and the README on a dark theme |
 | `runnerly-logo-dark.png` | the same lockup in near-black, for the README on a light theme |
-| `runnerly-wordmark.png` | the wordmark alone, for the giant one across the footer |
-| `runnerly-mark.png` | the mark alone |
+| `runnerly-mark.png` | the mark alone, which the favicon is built from |
 
 The README uses `<picture>` with `prefers-color-scheme`, because the logo is
 white and GitHub has a light theme: without it, half of all readers would

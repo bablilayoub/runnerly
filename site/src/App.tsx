@@ -10,7 +10,6 @@ import {
 import { Link } from "react-router-dom"
 
 import logo from "../../assets/runnerly-logo.png"
-import wordmark from "../../assets/runnerly-wordmark.png"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -714,15 +713,15 @@ function Footer() {
 }
 
 /**
- * The wordmark across the bottom of the footer.
+ * The logo, across the bottom of the footer.
  *
- * It is the real logo artwork rather than the name set in a typeface, so
- * the giant one and the small one in the header are the same drawing.
+ * The whole lockup rather than the word on its own, so the giant one and
+ * the small one in the header are the same drawing at two sizes.
  *
- * It is not cropped. Cropping it looked deliberate when the word sat tight
- * against the divider, but with the space this band actually has it just
- * read as a mistake — too much air above, none below. Whole word, centred
- * in its own band, equal space either side.
+ * It is not cropped. Cropping looked deliberate while it sat tight against
+ * the divider, but with the room this band has it read as a mistake — all
+ * the air above it and none below. Whole logo, centred, equal space either
+ * side.
  */
 function Wordmark() {
   return (
@@ -730,7 +729,7 @@ function Wordmark() {
       aria-hidden
       className="pointer-events-none relative z-0 select-none px-6 py-10 sm:px-10 sm:py-12"
     >
-      <img src={wordmark} alt="" className="block w-full opacity-[0.055]" />
+      <img src={logo} alt="" className="block w-full opacity-[0.055]" />
     </div>
   )
 }
