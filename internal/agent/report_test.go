@@ -220,7 +220,7 @@ func TestReportingFailuresDoNotStopSupervision(t *testing.T) {
 }
 
 func TestEventsAreDroppedRatherThanBlockingSupervision(t *testing.T) {
-	rep := newReporter(nil, testLogger(), time.Hour)
+	rep := newReporter(nil, testLogger(), time.Hour, "")
 
 	// Nothing is draining the queue, so it fills and then drops.
 	for range eventBuffer + 50 {
@@ -253,7 +253,7 @@ func TestObserveMapsSupervisorEventsToStatuses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
-			rep := newReporter(nil, testLogger(), time.Hour)
+			rep := newReporter(nil, testLogger(), time.Hour, "")
 			rep.observe(supervisor.Event{Kind: tt.kind})
 
 			rep.mu.Lock()

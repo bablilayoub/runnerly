@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -151,7 +152,8 @@ func Run(ctx context.Context, opts Options) (Outcome, error) {
 
 	var report *reporter
 	if opts.ControlPlane != nil {
-		report = newReporter(opts.ControlPlane, log, opts.HeartbeatInterval)
+		report = newReporter(opts.ControlPlane, log, opts.HeartbeatInterval,
+			runnerVersion(opts.Runner.Release))
 		if opts.Hooks.Install {
 			report.jobState = readJob
 		}
@@ -379,4 +381,23 @@ func logEvent(log *slog.Logger, e supervisor.Event, ephemeral bool) {
 	case supervisor.EventStopped:
 		log.Info("runner is stopped", "event", "runner_offline", "pid", e.PID)
 	}
+}
+
+// releaseVersion pulls the version out of the archive name GitHub published,
+// which is the only place the installed version is written down: the runner
+// ships no version file of its own, and its .runner config does not carry
+// one either.
+//
+// actions-runner-osx-arm64-2.337.0.tar.gz -> 2.337.0
+var releaseVersion = regexp.MustCompile(`-(\d+\.\d+\.\d+)\.tar\.gz$`)
+
+// runnerVersion reports the installed runner's version, or "" when it cannot
+// be told. An empty string means "unknown" everywhere it is shown, which is
+// better than a number that might be wrong.
+func runnerVersion(release string) string {
+	m := releaseVersion.FindStringSubmatch(release)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }

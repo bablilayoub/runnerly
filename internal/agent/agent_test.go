@@ -684,3 +684,28 @@ func runAgent(ctx context.Context, opts Options) error {
 	_, err := Run(ctx, opts)
 	return err
 }
+
+// TestRunnerVersionFromRelease covers a field that was declared, sent on
+// every heartbeat, and never assigned: the control plane's runner_version
+// column was always empty, so the dashboard had nothing to show. Found by
+// enrolling a real agent and reading the row it wrote.
+func TestRunnerVersionFromRelease(t *testing.T) {
+	for _, tc := range []struct {
+		release string
+		want    string
+	}{
+		{"actions-runner-osx-arm64-2.337.0.tar.gz", "2.337.0"},
+		{"actions-runner-linux-x64-2.330.1.tar.gz", "2.330.1"},
+		{"actions-runner-linux-arm64-2.300.10.tar.gz", "2.300.10"},
+		// Nothing recorded, because the runner was installed before
+		// Runnerly started keeping the filename.
+		{"", ""},
+		// Not a shape we know: better to say nothing than to guess.
+		{"actions-runner-linux-x64.tar.gz", ""},
+		{"something-else-1.2.3.zip", ""},
+	} {
+		if got := runnerVersion(tc.release); got != tc.want {
+			t.Errorf("runnerVersion(%q) = %q, want %q", tc.release, got, tc.want)
+		}
+	}
+}

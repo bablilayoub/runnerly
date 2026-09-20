@@ -66,16 +66,19 @@ const (
 	statusError    = "error"
 )
 
-func newReporter(client *controlplane.Client, log *slog.Logger, interval time.Duration) *reporter {
+func newReporter(
+	client *controlplane.Client, log *slog.Logger, interval time.Duration, runnerVer string,
+) *reporter {
 	if interval <= 0 {
 		interval = 20 * time.Second
 	}
 	return &reporter{
-		client:   client,
-		log:      log,
-		interval: interval,
-		status:   statusStarting,
-		events:   make(chan controlplane.Event, eventBuffer),
+		client:    client,
+		log:       log,
+		interval:  interval,
+		status:    statusStarting,
+		runnerVer: runnerVer,
+		events:    make(chan controlplane.Event, eventBuffer),
 	}
 }
 
