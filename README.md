@@ -1,4 +1,12 @@
-# Runnerly
+<!-- The logo is white, which is invisible on GitHub's light theme, so each
+     theme gets the variant it can actually see. The img fallback is the
+     dark-ink one, because a reader whose client ignores <picture> is more
+     likely to be on a light background. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/runnerly-logo.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/runnerly-logo-dark.png">
+  <img src="assets/runnerly-logo-dark.png" alt="Runnerly" width="320">
+</picture>
 
 Run GitHub Actions on your own infrastructure.
 

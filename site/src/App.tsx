@@ -9,6 +9,9 @@ import {
 } from "lucide-react"
 import { Link } from "react-router-dom"
 
+import logo from "../../assets/runnerly-logo.png"
+import wordmark from "../../assets/runnerly-wordmark.png"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -120,13 +123,8 @@ function Nav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/50 bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6">
-        <a href="#top" className="flex items-center gap-2.5">
-          <span className="grid size-6 place-items-center rounded border border-border">
-            <TerminalIcon className="size-3.5" />
-          </span>
-          <span className="font-display text-[1.05rem] font-semibold tracking-[-0.02em]">
-            Runnerly
-          </span>
+        <a href="#top" className="flex items-center">
+          <img src={logo} alt="Runnerly" className="h-[22px] w-auto" />
         </a>
         <nav className="flex items-center gap-1">
           <Button variant="ghost" size="sm" asChild className="rounded-full">
@@ -632,14 +630,7 @@ function Footer() {
         <div className="relative z-10 px-6 pt-10 sm:px-10 sm:pt-12">
           <div className="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">
             <div>
-              <div className="flex items-center gap-2.5">
-                <span className="grid size-6 place-items-center rounded border border-border">
-                  <TerminalIcon className="size-3.5" />
-                </span>
-                <span className="font-display text-[1.05rem] font-semibold tracking-[-0.02em]">
-                  Runnerly
-                </span>
-              </div>
+              <img src={logo} alt="Runnerly" className="h-6 w-auto" />
 
               <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
                 Self-hosted GitHub Actions runners you install, supervise and retire. Free to run,
@@ -723,52 +714,23 @@ function Footer() {
 }
 
 /**
- * The wordmark filling the bottom of the footer, cropped by it.
+ * The wordmark across the bottom of the footer.
  *
- * SVG rather than styled text because it has to span the card exactly at
- * every width. A font size in viewport units cannot: it knows the window,
- * not the container, so the word ran off both edges on a narrow screen and
- * left a gap on a wide one. A viewBox scales to whatever it is given, and
- * textLength pins the word to its full width.
+ * It is the real logo artwork rather than the name set in a typeface, so
+ * the giant one and the small one in the header are the same drawing.
  *
- * It sits just above the background rather than in a readable grey — this
- * is texture, not something to read — and is hidden from screen readers,
- * which have had the name twice already.
+ * It is not cropped. Cropping it looked deliberate when the word sat tight
+ * against the divider, but with the space this band actually has it just
+ * read as a mistake — too much air above, none below. Whole word, centred
+ * in its own band, equal space either side.
  */
 function Wordmark() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none relative z-0 mt-12 select-none overflow-hidden px-6 sm:mt-16 sm:px-10"
+      className="pointer-events-none relative z-0 select-none px-6 py-10 sm:px-10 sm:py-12"
     >
-      {/* The viewBox is shorter than the glyphs, which crops the word
-          against the footer's bottom edge.
-
-          How much shorter matters. The baseline sits at y=235, so a height
-          of 210 cut 25 units *above* it — through the bottom of every
-          letter, not through the descenders. 270 clears the baseline and
-          takes about half the descender on the y, which is the crop this
-          is meant to be. */}
-      <svg
-        viewBox="0 -70 1200 340"
-        className="block w-full"
-        preserveAspectRatio="xMidYMin meet"
-        role="presentation"
-        focusable="false"
-      >
-        <text
-          x="600"
-          y="235"
-          textAnchor="middle"
-          textLength="1200"
-          lengthAdjust="spacing"
-          fontSize="300"
-          fontWeight="500"
-          className="fill-foreground/[0.06] [font-family:var(--font-display)]"
-        >
-          runnerly
-        </text>
-      </svg>
+      <img src={wordmark} alt="" className="block w-full opacity-[0.055]" />
     </div>
   )
 }

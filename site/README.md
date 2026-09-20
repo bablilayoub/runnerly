@@ -47,6 +47,24 @@ Worth knowing when testing: an embedded or backgrounded browser throttles
 timers hard, so the replay will look stalled. Measure before concluding
 anything is slow — openhole.dev shows the same throttling in the same pane.
 
+## The logo
+
+The artwork lives once, in `assets/` at the repository root, and both the
+site and the GitHub README read it from there. The site imports it through
+Vite, which hashes and bundles it; the README references the same files by
+path. One copy, so the two can never show different marks.
+
+| File | Where it is used |
+| --- | --- |
+| `runnerly-logo.png` | the full lockup, white — the site's header and footer, and the README on a dark theme |
+| `runnerly-logo-dark.png` | the same lockup in near-black, for the README on a light theme |
+| `runnerly-wordmark.png` | the wordmark alone, for the giant one across the footer |
+| `runnerly-mark.png` | the mark alone |
+
+The README uses `<picture>` with `prefers-color-scheme`, because the logo is
+white and GitHub has a light theme: without it, half of all readers would
+see nothing at all.
+
 ## Components from elsewhere
 
 `src/components/ui/` is vendored — shadcn and ui-layouts copy source in
