@@ -248,6 +248,7 @@ func newRootCommand(e *env) *cobra.Command {
 
 	root.AddCommand(
 		newVersionCommand(e),
+		newSetupCommand(e),
 		newDoctorCommand(e),
 		newConfigCommand(e),
 		newLoginCommand(e),

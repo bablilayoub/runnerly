@@ -24,16 +24,61 @@ downloads and drives rather than reimplements.
 
 ## Quick start
 
-Requires Go 1.25 or newer. There is no installer yet; build from source:
+```bash
+curl -fsSL https://runnerly.dev/install.sh | sh
+runnerly setup
+```
+
+The installer works out the platform, verifies the archive against the
+checksum published with it, and installs three binaries. It never calls
+`sudo` on your behalf: if it cannot write where it wants to, it says so and
+prints the command to re-run.
+
+`setup` then does the rest — checks the machine, signs in to GitHub, picks a
+repository, registers the runner, and prints the commands to keep it running.
+It shows the whole plan and waits before changing anything:
+
+```text
+What this will do
+
+  write     /home/me/.config/runnerly/config.yaml
+  install   GitHub's runner into /home/me/.local/share/runnerly/runners/build-01
+  register  build-01 with owner/repo
+  labels    self-hosted,linux,x64,runnerly
+
+  Nothing is started. The last step prints how to do that.
+
+Go ahead? [y/N]:
+```
+
+Every step it takes is also a command of its own — `doctor`, `login`,
+`config init`, `runner create`, `agent systemd` — so nothing here is a black
+box, and a provisioning script can skip the wizard:
+
+```bash
+runnerly setup --repo owner/repo --yes   # prompts for nothing, fails instead
+```
+
+> **The installer needs a published release**, and there is not one yet.
+> `.github/workflows/release.yml` builds and publishes the archives and their
+> checksums when a `v*` tag is pushed; until then, and while this repository
+> is private, build from source.
+
+### From source
+
+Requires Go 1.25 or newer, and Node 22 for the dashboard:
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git
 cd runnerly
 make all           # dashboard, then binaries
 sudo make install  # optional: /usr/local/bin
+runnerly setup
 ```
 
-Check the machine, then register a runner:
+### Doing it a step at a time
+
+`setup` is a wrapper. The steps underneath it are the normal commands:
 
 ```bash
 runnerly doctor
@@ -180,9 +225,8 @@ Deliberately, for now:
   request; doing it automatically needs a maintenance window to be safe.
 - **Self-replacing binary.** There are no published releases to test that path
   against.
-- **`runnerly setup`**, the single interactive command. Its pieces all exist;
-  the wrapper does not.
-- **An installer.** No `install.sh`, no Homebrew tap.
+- **A package manager.** No Homebrew tap, no apt repository. `install.sh`
+  and building from source are the two paths.
 
 ## Documentation
 
@@ -203,7 +247,7 @@ Start with [getting started](docs/getting-started.md).
 | [Security model](docs/security.md) | what to know before you deploy |
 | [Troubleshooting](docs/troubleshooting.md) | when something is wrong |
 | [Architecture](docs/architecture.md) | how it fits together, and why |
-| [Development](docs/development.md) | working on Runnerly |
+| [Development](docs/development.md) | working on Runnerly, including the site |
 
 ## Contributing
 

@@ -20,6 +20,45 @@ launchd yourself. `doctor` says so and still exits `0`.
 Windows is not supported. The job hooks Runnerly installs are shell scripts,
 so cleanup between jobs and `busy` reporting do not work there.
 
+## The installer
+
+```bash
+curl -fsSL https://runnerly.dev/install.sh | sh
+```
+
+It works out the platform, downloads the matching release archive and the
+`SHA256SUMS` published beside it, refuses to continue if they disagree, and
+copies three binaries onto your PATH. Then:
+
+```bash
+runnerly setup
+```
+
+**This needs a published release, and there is not one yet.** The release
+workflow builds and uploads the archives when a `v*` tag is pushed; until
+that has happened, build from source.
+
+What the installer will not do: run `sudo` on your behalf, write outside the
+install directory, register a runner, or start anything. If `/usr/local/bin`
+is not writable it installs into `~/.local/bin` instead and tells you; if you
+pointed it somewhere it cannot write, it stops and prints the two ways to fix
+it.
+
+| Variable | Effect |
+| --- | --- |
+| `RUNNERLY_VERSION` | install this version instead of the latest |
+| `RUNNERLY_PREFIX` | install prefix; binaries go in `$RUNNERLY_PREFIX/bin` |
+| `RUNNERLY_REPO` | the `owner/repo` to download from |
+| `RUNNERLY_BASE_URL` | a mirror or an air-gapped host holding the same file names and a `SHA256SUMS`. Needs `RUNNERLY_VERSION` too, since a mirror has no "latest" to ask for |
+
+Piping a script into a shell means trusting the source. To read it first:
+
+```bash
+curl -fsSL https://runnerly.dev/install.sh -o install.sh
+less install.sh
+sh install.sh
+```
+
 ## From source
 
 Requires Go 1.25 or newer, and Node 22 or newer for the dashboard.
@@ -76,18 +115,18 @@ runnerly doctor
 
 ## Not available yet
 
-The one-line installer and package-manager builds described in the project plan
-do not exist yet:
+No package manager:
 
 ```bash
 # Not implemented
-curl -fsSL https://runnerly.dev/install.sh | sh
 brew install runnerly
+apt install runnerly
 ```
 
-Building from source is the only supported path today. When an installer does
-ship it will detect the platform, verify a checksum, and explain any step that
-needs root before taking it.
+`install.sh` and building from source are the two paths. Runnerly also does
+not replace its own binary: `runnerly upgrade` says when a newer version
+exists and leaves the swap to you, which for an installed release means
+running the installer again.
 
 ## Uninstall
 

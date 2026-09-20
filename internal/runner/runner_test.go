@@ -14,9 +14,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/github"
 )
 
@@ -128,10 +130,10 @@ func TestLabelsFor(t *testing.T) {
 }
 
 func TestMergeLabelsDedupesCaseInsensitively(t *testing.T) {
-	got := mergeLabels(Platform{OS: "linux", Arch: "x64"}, []string{"Linux", "docker", "  ", "docker", "runnerly"})
+	got := MergeLabels(Platform{OS: "linux", Arch: "x64"}, []string{"Linux", "docker", "  ", "docker", "runnerly"})
 	want := "self-hosted,linux,x64,docker,runnerly"
 	if strings.Join(got, ",") != want {
-		t.Errorf("mergeLabels() = %v, want %s", got, want)
+		t.Errorf("MergeLabels() = %v, want %s", got, want)
 	}
 }
 
@@ -544,5 +546,32 @@ func TestFetchReportsAnHTTPFailure(t *testing.T) {
 		&github.Download{DownloadURL: srv.URL, Filename: "x.tar.gz", SHA256Checksum: "abc"}, dest)
 	if err == nil || !strings.Contains(err.Error(), fmt.Sprint(http.StatusForbidden)) {
 		t.Errorf("error = %v, want the HTTP status", err)
+	}
+}
+
+// TestDefaultLabelsDoNotDuplicatePlatform pins the two places labels come
+// from together. The configuration's defaults used to name the OS with Go's
+// spelling while the platform labels used GitHub's, so a Mac registered both
+// "darwin" and "macOS". Nothing failed; the runner just carried a label that
+// no workflow would ever ask for.
+func TestDefaultLabelsDoNotDuplicatePlatform(t *testing.T) {
+	for _, tc := range []struct {
+		goos, goarch string
+		want         []string
+	}{
+		{"linux", "amd64", []string{"self-hosted", "linux", "x64", "runnerly"}},
+		{"linux", "arm64", []string{"self-hosted", "linux", "arm64", "runnerly"}},
+		{"darwin", "arm64", []string{"self-hosted", "macOS", "arm64", "runnerly"}},
+	} {
+		t.Run(tc.goos+"/"+tc.goarch, func(t *testing.T) {
+			platform, err := PlatformFor(tc.goos, tc.goarch)
+			if err != nil {
+				t.Fatalf("PlatformFor: %v", err)
+			}
+			got := MergeLabels(platform, config.Default().Runner.Labels)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("labels = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

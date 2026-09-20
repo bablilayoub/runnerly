@@ -16,6 +16,7 @@ retires runners so you do not do those steps by hand.
 
 | Command | What it does |
 | --- | --- |
+| `runnerly setup` | all of the below, in one interactive command |
 | `runnerly doctor` | says whether a machine can host a runner |
 | `runnerly login` / `logout` / `auth status` | the GitHub token |
 | `runnerly repo list` | repositories you can attach a runner to |
@@ -32,9 +33,30 @@ retires runners so you do not do those steps by hand.
 Everything up to `agent run` works on one machine with no server. A control
 plane is optional and covered at the end.
 
+## The short version
+
+```bash
+curl -fsSL https://runnerly.dev/install.sh | sh
+runnerly setup
+```
+
+`setup` checks the machine, signs in to GitHub, picks a repository, registers
+a runner and prints the commands to keep it running — showing the whole plan
+and waiting before it changes anything.
+
+That is the whole page. The rest of it is what `setup` is doing, one step at
+a time, because sooner or later you will want to do one of them by hand.
+
+```bash
+runnerly setup --repo owner/repo --yes   # for a provisioning script
+```
+
+With `--yes` it prompts for nothing and fails rather than asking, so supply
+the token through `RUNNERLY_GITHUB_TOKEN`.
+
 ## Install
 
-See [installation.md](installation.md). There is no release build yet, so you
+The installer needs a published release, and there is not one yet, so for now
 build from source:
 
 ```bash
@@ -45,7 +67,7 @@ sudo make install     # optional: puts them in /usr/local/bin
 ```
 
 `make build` on its own skips the dashboard and needs no Node. The CLI and
-the agent do not use it either way.
+the agent do not use it either way. See [installation.md](installation.md).
 
 ## Check a machine
 

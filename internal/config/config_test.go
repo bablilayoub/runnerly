@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -14,20 +15,24 @@ func TestDefaultIsValid(t *testing.T) {
 	}
 }
 
-func TestDefaultLabelsNormalizeAmd64ToX64(t *testing.T) {
+// TestDefaultLabelsNameNoPlatform guards the fix for a label the
+// configuration should never have carried.
+//
+// This used to assert labels[0] == runtime.GOOS, which is exactly the bug: on
+// macOS that is "darwin" while GitHub's own runner says "macOS", so a Mac
+// registered both. The platform labels are added at registration from the
+// platform Runnerly detects, so naming them here at all was a second copy
+// free to disagree with the first. internal/runner has the test that pins the
+// merged result.
+func TestDefaultLabelsNameNoPlatform(t *testing.T) {
 	labels := defaultLabels()
-	if labels[0] != runtime.GOOS {
-		t.Errorf("first label = %q, want %q", labels[0], runtime.GOOS)
+	if len(labels) != 1 || labels[0] != "runnerly" {
+		t.Fatalf("defaultLabels() = %v, want [runnerly]", labels)
 	}
-	want := runtime.GOARCH
-	if want == "amd64" {
-		want = "x64"
-	}
-	if labels[1] != want {
-		t.Errorf("arch label = %q, want %q", labels[1], want)
-	}
-	if labels[len(labels)-1] != "runnerly" {
-		t.Errorf("missing runnerly marker label: %v", labels)
+	for _, forbidden := range []string{runtime.GOOS, runtime.GOARCH, "x64", "macOS", "self-hosted"} {
+		if slices.Contains(labels, forbidden) {
+			t.Errorf("defaultLabels() names the platform (%q): %v", forbidden, labels)
+		}
 	}
 }
 

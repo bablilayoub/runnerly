@@ -1,0 +1,5 @@
+# `smoke` labels the self-hosted runner that the smoke workflow targets. It
+# is not one of GitHub's labels, so actionlint has to be told it exists.
+self-hosted-runner:
+  labels:
+    - smoke

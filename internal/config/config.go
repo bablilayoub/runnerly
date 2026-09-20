@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -299,14 +298,16 @@ func Default() Config {
 	}
 }
 
-// defaultLabels mirrors the labels GitHub's own runner applies, plus a marker
-// so Runnerly-managed runners are identifiable in the GitHub UI.
+// defaultLabels is the marker that makes Runnerly-managed runners
+// identifiable in the GitHub UI, and nothing else.
+//
+// It deliberately does not name the OS or the architecture. Those are added
+// on every registration from the platform Runnerly detects, so naming them
+// here would only be a second copy that can disagree with the first — and it
+// did: this used to return runtime.GOOS, which is "darwin" where GitHub says
+// "macOS", so a Mac registered both.
 func defaultLabels() []string {
-	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "x64"
-	}
-	return []string{runtime.GOOS, arch, "runnerly"}
+	return []string{"runnerly"}
 }
 
 // CleanupAfterJob reports whether the Docker executor should tidy up when a

@@ -146,6 +146,97 @@ jobs:
           path: internal/web/dist
           if-no-files-found: error
 
+  site:
+    name: landing page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install
+        working-directory: site
+        run: npm ci --no-fund --no-audit
+
+      - name: Typecheck
+        working-directory: site
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: site
+        run: npm run lint
+
+      - name: Build
+        working-directory: site
+        run: npm run build
+
+      # The page tells people to curl this URL. If the copy step ever stops
+      # working, the site would 404 the one command it advertises.
+      - name: Check the installer is published with the site
+        run: |
+          test -f site/dist/install.sh
+          head -1 site/dist/install.sh | grep -q '^#!/bin/sh'
+
+  installer:
+    name: installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck --shell=sh install.sh
+
+      # Run the whole installer against a release built here, so the download,
+      # checksum and unpack paths are exercised rather than assumed.
+      - name: Install from a local release
+        run: |
+          set -euo pipefail
+          rel="$(mktemp -d)"
+          dest="$(mktemp -d)"
+          name="runnerly_v0.0.0-test_linux_amd64"
+          mkdir -p "$rel/$name"
+          for b in runnerly runnerly-agent runnerly-server; do
+            printf '#!/bin/sh\necho %s\n' "$b" > "$rel/$name/$b"
+            chmod +x "$rel/$name/$b"
+          done
+          tar -C "$rel" -czf "$rel/$name.tar.gz" "$name"
+          rm -rf "$rel/${name:?}"
+          (cd "$rel" && sha256sum ./*.tar.gz | sed 's|\./||' > SHA256SUMS)
+
+          RUNNERLY_VERSION=v0.0.0-test \
+          RUNNERLY_BASE_URL="file://$rel" \
+          RUNNERLY_PREFIX="$dest" \
+            sh install.sh
+
+          "$dest/bin/runnerly" | grep -q runnerly
+
+      - name: Refuse a tampered archive
+        run: |
+          set -euo pipefail
+          rel="$(mktemp -d)"
+          dest="$(mktemp -d)"
+          name="runnerly_v0.0.0-test_linux_amd64"
+          mkdir -p "$rel/$name"
+          echo x > "$rel/$name/runnerly"
+          tar -C "$rel" -czf "$rel/$name.tar.gz" "$name"
+          rm -rf "$rel/${name:?}"
+          (cd "$rel" && sha256sum ./*.tar.gz | sed 's|\./||' > SHA256SUMS)
+          echo tampered >> "$rel/$name.tar.gz"
+
+          if RUNNERLY_VERSION=v0.0.0-test \
+             RUNNERLY_BASE_URL="file://$rel" \
+             RUNNERLY_PREFIX="$dest" \
+               sh install.sh; then
+            echo "the installer accepted an archive that failed its checksum"
+            exit 1
+          fi
+          # And left nothing behind.
+          test ! -e "$dest/bin/runnerly"
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -160,6 +251,11 @@ jobs:
       # The version is pinned in the Makefile so local and CI runs agree.
       - name: golangci-lint
         run: make lint
+
+      # The workflows are code too, and a typo in one is only discovered by
+      # pushing. actionlint also runs shellcheck over every `run:` block.
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})

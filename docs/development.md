@@ -13,11 +13,41 @@
 make all        # the dashboard, then the three binaries into dist/
 make build      # the binaries alone; no Node needed
 make test       # unit tests
-make check      # everything CI runs: fmt-check, vet, lint, test
+make check      # everything CI runs: fmt-check, vet, lint, lint-sh, lint-actions, test
 make run ARGS="doctor --offline"
 ```
 
 `make help` lists every target.
+
+There are two Node packages, and neither is needed to build the Go code:
+
+| | | |
+| --- | --- | --- |
+| `web/` | the dashboard | `make web`, embedded into `runnerly-server` |
+| `site/` | runnerly.dev | `make site`, `make site-dev`, published as static files |
+
+Each carries a `go.mod` of its own. They hold no Go code; the boundary exists
+because npm packages occasionally vendor some, and without it
+`go build ./...` from the root would compile a dependency's Go source as part
+of Runnerly.
+
+`make site` also copies `install.sh` into `site/dist`, because the page tells
+people to `curl https://runnerly.dev/install.sh`. There is one installer in
+the repository and the site publishes that one, so the page cannot advertise
+a stale copy.
+
+## install.sh
+
+`make lint-sh` runs shellcheck over it. CI goes further and runs the whole
+installer against a release built in the job — including a deliberately
+corrupted archive, to check it refuses and leaves nothing behind. The
+`RUNNERLY_BASE_URL` variable is what makes that possible, and it is a real
+feature too: a mirror or an air-gapped host.
+
+## Workflows
+
+`make lint-actions` runs actionlint, which also runs shellcheck over every
+`run:` block. It is pinned in the Makefile and CI runs the same version.
 
 `make check` is the gate. If it passes locally, CI should pass.
 

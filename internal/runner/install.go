@@ -144,7 +144,7 @@ func Install(ctx context.Context, env Env, client *github.Client, scope github.S
 		progress(opts, "reusing the runner already unpacked in "+opts.Dir)
 	}
 
-	labels := mergeLabels(platform, opts.Labels)
+	labels := MergeLabels(platform, opts.Labels)
 	progress(opts, "registering with GitHub")
 	if err := configure(ctx, env, opts, labels); err != nil {
 		return nil, err
@@ -232,9 +232,9 @@ func fetch(ctx context.Context, env Env, download *github.Download, dest string)
 	return nil
 }
 
-// mergeLabels combines the platform labels GitHub's runner would apply with
+// MergeLabels combines the platform labels GitHub's runner would apply with
 // the operator's own, preserving order and dropping duplicates.
-func mergeLabels(platform Platform, custom []string) []string {
+func MergeLabels(platform Platform, custom []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, l := range append(LabelsFor(platform), custom...) {

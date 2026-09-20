@@ -24,11 +24,14 @@ LDFLAGS     := -s -w \
 GO          ?= go
 # node_modules can contain vendored Go source that is not ours; the go tool
 # ignores it and so should the format check.
-GOFILES     := $(shell find . -name '*.go' -not -path './$(DIST)/*' -not -path './web/node_modules/*')
+GOFILES     := $(shell find . -name '*.go' -not -path './$(DIST)/*' \
+	-not -path './web/node_modules/*' -not -path './site/node_modules/*')
 
 NPM         ?= npm
 WEB         := web
 WEB_DIST    := internal/web/dist
+SITE        := site
+SITE_DIST   := site/dist
 
 # Pinned so a new linter release cannot turn a green checkout red. CI runs
 # `make lint`, so this is the only place the version is written down.
@@ -36,6 +39,9 @@ WEB_DIST    := internal/web/dist
 # Override with an installed binary: make lint GOLANGCI_LINT=golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.13.2
 GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+# Same pinning for the workflow linter, which CI runs from the same version.
+ACTIONLINT_VERSION ?= v1.7.7
 
 .DEFAULT_GOAL := help
 
@@ -59,6 +65,24 @@ web-check: ## Typecheck, lint and format-check the dashboard
 	cd $(WEB) && $(NPM) run typecheck
 	cd $(WEB) && $(NPM) run lint
 	cd $(WEB) && $(NPM) run format:check
+
+.PHONY: site
+site: ## Build the landing page into site/dist (needs Node)
+	cd $(SITE) && $(NPM) ci --no-fund --no-audit
+	cd $(SITE) && $(NPM) run build
+
+.PHONY: site-dev
+site-dev: ## Run the landing page with hot reload
+	cd $(SITE) && $(NPM) run dev
+
+.PHONY: site-check
+site-check: ## Typecheck and lint the landing page
+	cd $(SITE) && $(NPM) run typecheck
+	cd $(SITE) && $(NPM) run lint
+
+.PHONY: site-clean
+site-clean: ## Remove the built landing page
+	rm -rf $(SITE_DIST)
 
 .PHONY: web-clean
 web-clean: ## Remove the built dashboard
@@ -123,9 +147,19 @@ lint: ## Run golangci-lint (fetches the pinned version on first use)
 tidy: ## Tidy go.mod and go.sum
 	$(GO) mod tidy
 
+.PHONY: lint-actions
+lint-actions: ## Check the GitHub workflows (runs shellcheck over run: blocks)
+	$(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+.PHONY: lint-sh
+lint-sh: ## Check install.sh with shellcheck, when it is installed
+	@command -v shellcheck >/dev/null 2>&1 \
+		&& shellcheck --shell=sh install.sh \
+		|| { echo "shellcheck is not installed; checking syntax only."; sh -n install.sh; }
+
 .PHONY: check
-check: fmt-check vet lint test ## Everything CI runs
+check: fmt-check vet lint lint-sh lint-actions test ## Everything CI runs
 
 .PHONY: clean
-clean: web-clean ## Remove build artifacts
+clean: web-clean site-clean ## Remove build artifacts
 	rm -rf $(DIST) coverage.out

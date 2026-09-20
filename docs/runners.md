@@ -9,6 +9,11 @@ Runnerly. Runnerly manages its lifecycle; it does not replace it.
 runnerly runner create --repo acme/widgets
 ```
 
+`runnerly setup` wraps this together with the machine check, signing in and
+the service unit. Everything below is what it does for the registration step,
+and is what to reach for when you want one part rather than the whole
+sequence.
+
 What happens:
 
 1. Check the security policy for the target (see below).

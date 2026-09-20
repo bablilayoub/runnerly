@@ -133,10 +133,9 @@ runner:
   name: ""
   # GitHub runner labels. These map directly to GitHub's; Runnerly adds no
   # routing system of its own. The platform labels (self-hosted, the OS,
-  # the architecture) are always added on top.
+  # the architecture) are always added on top, so naming them here is
+  # unnecessary and is how they get to disagree.
   labels:
-    - linux
-    - x64
     - runnerly
   # Where the official GitHub runner is installed. Empty uses
   # /opt/runnerly/runners for root, or ~/.local/share/runnerly/runners.
@@ -194,12 +193,16 @@ security:
 
 ### Defaults worth knowing
 
-`runner.labels` defaults to the machine's own OS and architecture plus a
-`runnerly` marker, so Runnerly-managed runners are identifiable in the
-GitHub UI. On Linux x86_64 that is `linux`, `x64`, `runnerly` — matching the
-names GitHub uses, not Go's (`amd64` becomes `x64`). Registered together with
-the platform labels, that machine ends up with
-`self-hosted,linux,x64,runnerly`.
+`runner.labels` defaults to a single `runnerly` marker, so Runnerly-managed
+runners are identifiable in the GitHub UI. The platform labels are added at
+registration from the platform Runnerly detects, so a Linux x86_64 machine
+registers `self-hosted,linux,x64,runnerly` and a Mac registers
+`self-hosted,macOS,arm64,runnerly`.
+
+The default deliberately does not name the OS or the architecture. It used
+to, using Go's names — which meant a Mac registered both `darwin` and
+GitHub's own `macOS`. One source for a fact is better than two that can
+disagree.
 
 `executor.type` defaults to `docker`. If Docker is not installed and you do not
 want it, set `type: host` and `doctor` stops requiring Docker.

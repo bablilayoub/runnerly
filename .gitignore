@@ -13,6 +13,11 @@
 /web/node_modules/
 *.tsbuildinfo
 
+# The landing site. Unlike the dashboard, nothing embeds its output, so the
+# whole directory is build artifact.
+/site/node_modules/
+/site/dist/
+
 # Local configuration and runner state
 /.runnerly/
 *.local.yaml
