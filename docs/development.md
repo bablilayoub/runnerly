@@ -4,6 +4,7 @@
 
 - Go 1.25 or newer
 - `make`
+- Node 22 or newer, only to build the dashboard
 - Docker, if you want the Docker checks in `doctor` to exercise a real daemon
 
 ## Everyday commands
@@ -76,6 +77,7 @@ struct of function fields so tests never touch the machine or the network:
 | `internal/agent` | `agent.Options.Start` | the same fake, through the agent |
 | `internal/cli` | `env.newGitHubClient`, `env.runnerEnv` | a client pointed at `httptest` |
 | `internal/server` | `Options.Now` | a clock a test can move forward |
+| `internal/web` | the embedded `dist` | tests skip what does not apply to the build |
 
 The supervisor is tested both ways on purpose. Fakes cover the state machine —
 backoff, giving up, clearing history, the kill path — deterministically and
@@ -120,6 +122,29 @@ together did not.
 CI runs them against a PostgreSQL service container, and then checks that
 they did not skip — a skipped suite and a passing one look identical in the
 summary, which is exactly how this coverage would quietly disappear.
+
+## The dashboard
+
+```bash
+make web        # build it into internal/web/dist
+make web-check  # typecheck, lint, format-check
+make all        # dashboard, then binaries
+```
+
+`make build` on its own produces a working server without the dashboard, and
+the Go build never needs Node. A binary built that way serves a page saying
+so; the API is unaffected. Do not add a Go dependency on the built assets
+existing.
+
+For UI work, run both sides:
+
+```bash
+runnerly-server                 # terminal one
+cd web && npm run dev           # terminal two, proxies /api to it
+```
+
+`web/` has its own `go.mod`, which is what keeps `go build ./...` from
+compiling Go source vendored inside npm packages. Do not delete it.
 
 ## Adding a migration
 

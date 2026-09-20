@@ -218,3 +218,76 @@ func TestAnUnreachableControlPlaneIsReported(t *testing.T) {
 		t.Errorf("a network failure was reported as an auth failure: %v", err)
 	}
 }
+
+// TestRestartReachesTheAgentOnItsHeartbeat exercises the whole command path
+// against a real server: queue, deliver, report.
+func TestRestartReachesTheAgentOnItsHeartbeat(t *testing.T) {
+	baseURL, db := liveServer(t)
+	ctx := context.Background()
+
+	registered, err := controlplane.New(baseURL, "").
+		Register(ctx, enrollmentToken(t, db), sampleRegistration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := controlplane.New(baseURL, registered.MachineToken)
+
+	queued, err := db.QueueCommand(ctx, registered.Runner.ID, store.CommandRestart, "octocat")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	beat, err := client.Heartbeat(ctx, controlplane.HeartbeatRequest{Status: store.StatusOnline})
+	if err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	if len(beat.Commands) != 1 {
+		t.Fatalf("commands = %+v, want the queued restart", beat.Commands)
+	}
+	if beat.Commands[0].ID != queued.ID || beat.Commands[0].Command != controlplane.CommandRestart {
+		t.Errorf("command = %+v", beat.Commands[0])
+	}
+
+	if err := client.CompleteCommand(ctx, beat.Commands[0].ID, ""); err != nil {
+		t.Fatalf("CompleteCommand() error = %v", err)
+	}
+
+	commands, err := db.ListCommands(ctx, registered.Runner.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commands[0].Status != store.CommandDone {
+		t.Errorf("status = %q, want done", commands[0].Status)
+	}
+}
+
+func TestAFailedCommandIsReportedWithItsReason(t *testing.T) {
+	baseURL, db := liveServer(t)
+	ctx := context.Background()
+
+	registered, err := controlplane.New(baseURL, "").
+		Register(ctx, enrollmentToken(t, db), sampleRegistration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := controlplane.New(baseURL, registered.MachineToken)
+
+	queued, err := db.QueueCommand(ctx, registered.Runner.ID, store.CommandRestart, "octocat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Heartbeat(ctx, controlplane.HeartbeatRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CompleteCommand(ctx, queued.ID, "the runner would not stop"); err != nil {
+		t.Fatal(err)
+	}
+
+	commands, err := db.ListCommands(ctx, registered.Runner.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commands[0].Status != store.CommandFailed || commands[0].Error != "the runner would not stop" {
+		t.Errorf("command = %+v", commands[0])
+	}
+}

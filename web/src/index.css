@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/* Monochrome, high contrast, dense. Color appears in exactly one place —
+   runner status — because that is the only thing on the page where hue
+   carries meaning rather than decoration. */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, 'Cascadia Mono', Consolas, monospace;
+}
+
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f6f6f7;
+  --bg-raised: #ffffff;
+  --border: #e3e3e6;
+  --border-strong: #c9c9ce;
+  --text: #111113;
+  --text-muted: #6b6b73;
+  --text-faint: #96969e;
+
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --bad: #b3261e;
+  --busy: #0969da;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0c0d;
+    --bg-subtle: #151517;
+    --bg-raised: #131315;
+    --border: #26262a;
+    --border-strong: #3a3a41;
+    --text: #f0f0f2;
+    --text-muted: #9a9aa3;
+    --text-faint: #6b6b73;
+
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --busy: #58a6ff;
+  }
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  /* Numbers line up in tables without a fixed-width font everywhere. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One focus treatment everywhere, visible against both themes. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -805,3 +805,177 @@ func TestPlainHTTPCookiesAreFlaggedButStillServed(t *testing.T) {
 		})
 	}
 }
+
+func TestRestartIsQueuedForTheNextHeartbeat(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	machineToken, runner := h.enroll("runnerly-01")
+
+	rec := h.do(http.MethodPost, "/api/v1/runners/"+runner.ID+"/restart", nil, session)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var queued RestartResponse
+	decode(t, rec, &queued)
+	if queued.Command.Status != store.CommandPending {
+		t.Errorf("command = %+v", queued.Command)
+	}
+	// The response must not imply the restart already happened.
+	if !strings.Contains(queued.Note, "next heartbeat") {
+		t.Errorf("note should explain the delay: %q", queued.Note)
+	}
+
+	// The agent collects it on its next heartbeat.
+	rec = h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{Status: store.StatusOnline}, withBearer(machineToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("heartbeat status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var beat HeartbeatResponse
+	decode(t, rec, &beat)
+	if len(beat.Commands) != 1 || beat.Commands[0].Command != store.CommandRestart {
+		t.Fatalf("commands = %+v", beat.Commands)
+	}
+
+	// And only once. This decodes into a fresh value on purpose: `commands`
+	// is omitempty, so reusing the previous one would leave the old slice in
+	// place and quietly pass.
+	var secondBeat HeartbeatResponse
+	rec = h.do(http.MethodPost, "/api/v1/agent/heartbeat", HeartbeatRequest{}, withBearer(machineToken))
+	decode(t, rec, &secondBeat)
+	if len(secondBeat.Commands) != 0 {
+		t.Errorf("the command was delivered twice: %+v", secondBeat.Commands)
+	}
+
+	// The agent reports the outcome.
+	rec = h.do(http.MethodPost, "/api/v1/agent/commands/"+queued.Command.ID+"/result",
+		CommandResultRequest{}, withBearer(machineToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("result status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/runners/"+runner.ID+"/commands", nil, session)
+	var listed CommandsResponse
+	decode(t, rec, &listed)
+	if len(listed.Commands) != 1 || listed.Commands[0].Status != store.CommandDone {
+		t.Errorf("commands = %+v", listed.Commands)
+	}
+}
+
+func TestRestartingTwiceQueuesOneCommand(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	_, runner := h.enroll("runnerly-01")
+
+	var first, second RestartResponse
+	rec := h.do(http.MethodPost, "/api/v1/runners/"+runner.ID+"/restart", nil, session)
+	decode(t, rec, &first)
+	rec = h.do(http.MethodPost, "/api/v1/runners/"+runner.ID+"/restart", nil, session)
+	decode(t, rec, &second)
+
+	if first.Command.ID != second.Command.ID {
+		t.Error("pressing restart twice queued two restarts")
+	}
+}
+
+func TestRestartAnUnknownRunnerIs404(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	rec := h.do(http.MethodPost,
+		"/api/v1/runners/2f1c6f5e-0000-4000-8000-000000000000/restart", nil, session)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestRestartNeedsASession(t *testing.T) {
+	h := newHarness(t)
+	_, runner := h.enroll("runnerly-01")
+	if rec := h.do(http.MethodPost, "/api/v1/runners/"+runner.ID+"/restart", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestAnAgentCannotCompleteAnotherRunnersCommand(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	_, mine := h.enroll("runnerly-01")
+	otherToken, _ := h.enroll("runnerly-02")
+
+	rec := h.do(http.MethodPost, "/api/v1/runners/"+mine.ID+"/restart", nil, session)
+	var queued RestartResponse
+	decode(t, rec, &queued)
+
+	rec = h.do(http.MethodPost, "/api/v1/agent/commands/"+queued.Command.ID+"/result",
+		CommandResultRequest{}, withBearer(otherToken))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: one agent closed another's command", rec.Code)
+	}
+}
+
+func TestAuthConfigIsPublicAndHonest(t *testing.T) {
+	// Unconfigured: the sign-in page needs to know before it offers a
+	// button that would lead to a 501.
+	h := newHarness(t)
+	rec := h.do(http.MethodGet, "/api/v1/auth/config", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 without a session", rec.Code)
+	}
+
+	var cfg AuthConfigResponse
+	decode(t, rec, &cfg)
+	if cfg.SignInAvailable {
+		t.Error("sign_in_available = true with no OAuth configured")
+	}
+	for _, want := range []string{"client_id", "client_secret"} {
+		if !strings.Contains(cfg.Reason, want) {
+			t.Errorf("reason should name %q: %q", want, cfg.Reason)
+		}
+	}
+	if !strings.Contains(cfg.Hint, "callback") {
+		t.Errorf("hint should give the callback URL: %q", cfg.Hint)
+	}
+}
+
+func TestAuthConfigReportsAConfiguredServer(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.OAuth = OAuthConfig{ClientID: "abc", ClientSecret: "shh"}
+		o.PublicURL = "https://runnerly.example.com"
+	})
+
+	rec := h.do(http.MethodGet, "/api/v1/auth/config", nil)
+	var cfg AuthConfigResponse
+	decode(t, rec, &cfg)
+
+	if !cfg.SignInAvailable {
+		t.Errorf("sign_in_available = false though OAuth is configured: %+v", cfg)
+	}
+	// It must not leak the secret while describing the configuration.
+	if strings.Contains(rec.Body.String(), "shh") {
+		t.Error("the client secret appears in the public auth config")
+	}
+}
+
+func TestTheDashboardIsServedAndDoesNotShadowTheAPI(t *testing.T) {
+	h := newHarness(t)
+
+	// A browser route returns a page, whether or not a dashboard was built
+	// into this binary.
+	rec := h.do(http.MethodGet, "/runners", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /runners = %d, want 200 so the browser router can handle it", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("Content-Type = %q, want HTML", rec.Header().Get("Content-Type"))
+	}
+
+	// An unknown API path must stay a JSON 404, not become a page.
+	rec = h.do(http.MethodGet, "/api/v1/nope", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "json") {
+		t.Errorf("Content-Type = %q, want JSON: an API typo must not return HTML",
+			rec.Header().Get("Content-Type"))
+	}
+}

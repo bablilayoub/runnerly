@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -137,6 +138,69 @@ func (s *Server) handleDeleteRunner(w http.ResponseWriter, r *http.Request) {
 		"note": "Removed from the control plane only. The runner is still registered with " +
 			"GitHub and still installed on its machine; use `runnerly runner remove` there.",
 	})
+}
+
+// RestartResponse describes the queued restart.
+type RestartResponse struct {
+	Command store.Command `json:"command"`
+	Note    string        `json:"note"`
+}
+
+func (s *Server) handleRestartRunner(w http.ResponseWriter, r *http.Request) {
+	user, _ := userFrom(r.Context())
+	id := r.PathValue("id")
+
+	runner, err := s.store.Runner(r.Context(), id)
+	if err != nil {
+		s.failStore(w, r, err, "that runner")
+		return
+	}
+
+	command, err := s.store.QueueCommand(r.Context(), runner.ID, store.CommandRestart, user.Login)
+	if err != nil {
+		s.failInternal(w, r, err, "queue the restart")
+		return
+	}
+
+	if err := s.store.RecordAudit(r.Context(), user.Login, "runner.restart", runner.Name, nil); err != nil {
+		s.log(r).Warn("could not record the audit entry",
+			"event", "audit_write_failed", "error", err.Error())
+	}
+	if _, err := s.store.RecordEvent(r.Context(), store.NewEvent{
+		RunnerID: runner.ID,
+		Event:    "restart_requested",
+		Severity: store.SeverityInfo,
+		Message:  user.Login + " asked for a restart",
+	}); err != nil {
+		s.log(r).Warn("could not record the event",
+			"event", "event_write_failed", "error", err.Error())
+	}
+
+	// Be honest about the delay rather than implying the button was
+	// immediate: the agent picks this up on its next heartbeat.
+	s.writeJSON(w, r, http.StatusAccepted, RestartResponse{
+		Command: command,
+		Note: fmt.Sprintf("Queued. The agent collects it on its next heartbeat, within about %ds.",
+			int(s.heartbeatInterval/time.Second)),
+	})
+}
+
+// CommandsResponse lists a runner's recent commands.
+type CommandsResponse struct {
+	Commands []store.Command `json:"commands"`
+}
+
+func (s *Server) handleListCommands(w http.ResponseWriter, r *http.Request) {
+	limit, ok := s.intQuery(w, r, "limit", 0)
+	if !ok {
+		return
+	}
+	commands, err := s.store.ListCommands(r.Context(), r.PathValue("id"), limit)
+	if err != nil {
+		s.failInternal(w, r, err, "list commands")
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, CommandsResponse{Commands: commands})
 }
 
 // EventsListResponse is an event feed page.

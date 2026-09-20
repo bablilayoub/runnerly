@@ -22,7 +22,13 @@ LDFLAGS     := -s -w \
 	-X $(PKG).Date=$(DATE)
 
 GO          ?= go
-GOFILES     := $(shell find . -name '*.go' -not -path './$(DIST)/*')
+# node_modules can contain vendored Go source that is not ours; the go tool
+# ignores it and so should the format check.
+GOFILES     := $(shell find . -name '*.go' -not -path './$(DIST)/*' -not -path './web/node_modules/*')
+
+NPM         ?= npm
+WEB         := web
+WEB_DIST    := internal/web/dist
 
 # Pinned so a new linter release cannot turn a green checkout red. CI runs
 # `make lint`, so this is the only place the version is written down.
@@ -38,8 +44,31 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[1m%-14s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: web
+web: ## Build the dashboard into internal/web/dist (needs Node)
+	@command -v $(NPM) >/dev/null 2>&1 || { \
+		echo "npm is not installed, so the dashboard cannot be built."; \
+		echo "The Go build works without it; the server then serves a page saying so."; \
+		exit 1; \
+	}
+	cd $(WEB) && $(NPM) ci --no-fund --no-audit
+	cd $(WEB) && $(NPM) run build
+
+.PHONY: web-check
+web-check: ## Typecheck, lint and format-check the dashboard
+	cd $(WEB) && $(NPM) run typecheck
+	cd $(WEB) && $(NPM) run lint
+	cd $(WEB) && $(NPM) run format:check
+
+.PHONY: web-clean
+web-clean: ## Remove the built dashboard
+	find $(WEB_DIST) -mindepth 1 ! -name .gitkeep -delete
+
+.PHONY: all
+all: web build ## Build the dashboard and then the binaries
+
 .PHONY: build
-build: ## Build all three binaries into dist/
+build: ## Build all three binaries into dist/ (run `make web` first to include the dashboard)
 	@mkdir -p $(DIST)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY) $(CMD)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(AGENT) $(AGENT_CMD)
@@ -98,5 +127,5 @@ tidy: ## Tidy go.mod and go.sum
 check: fmt-check vet lint test ## Everything CI runs
 
 .PHONY: clean
-clean: ## Remove build artifacts
+clean: web-clean ## Remove build artifacts
 	rm -rf $(DIST) coverage.out

@@ -144,6 +144,10 @@ a `hint` saying what to do.
 | `GET /runners` | session | list runners |
 | `GET /runners/{id}` | session | one runner |
 | `DELETE /runners/{id}` | session | forget a runner |
+| `POST /runners/{id}/restart` | session | queue a restart for the next heartbeat |
+| `GET /runners/{id}/commands` | session | that runner's recent commands |
+| `POST /agent/commands/{id}/result` | machine token | report a command's outcome |
+| `GET /auth/config` | none | whether sign-in is available |
 | `GET /events` | session | the event feed |
 | `GET /enrollment-tokens` | session | list tokens |
 | `POST /enrollment-tokens` | session | issue a token |
@@ -191,11 +195,9 @@ Expired sessions are pruned on the same schedule.
 
 ## What is not implemented
 
-- **The web dashboard.** The API it needs exists and is tested; the UI is the
-  next piece of work.
-- **Restart and upgrade commands.** The plan has `POST /runners/{id}/restart`
-  and `/upgrade`. Both need a command channel from server to agent, which is
-  worth designing alongside the dashboard that would use it.
+- **Upgrade commands.** `POST /runners/{id}/upgrade` is in the plan. The
+  command channel now exists to carry it; deciding what an unattended runner
+  upgrade should do is the missing part.
 - **TLS in the server itself.** Terminate it in front.
 - **Multi-tenancy.** Every signed-in user sees every runner. The allow list is
   the only access control.

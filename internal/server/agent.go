@@ -141,10 +141,22 @@ type HeartbeatRequest struct {
 	AgentVersion  string  `json:"agent_version"`
 }
 
-// HeartbeatResponse tells the agent what the server now believes.
+// PendingCommand is an instruction handed to the agent.
+type PendingCommand struct {
+	ID      string `json:"id"`
+	Command string `json:"command"`
+}
+
+// HeartbeatResponse tells the agent what the server now believes, and hands
+// over anything an operator has asked it to do.
+//
+// Commands ride on the heartbeat because the server cannot reach an agent:
+// runner machines sit behind NAT and firewalls, and opening an inbound port
+// on each one would be worse than waiting for the next beat.
 type HeartbeatResponse struct {
-	Runner store.Runner `json:"runner"`
-	Config AgentConfig  `json:"config"`
+	Runner   store.Runner     `json:"runner"`
+	Config   AgentConfig      `json:"config"`
+	Commands []PendingCommand `json:"commands,omitempty"`
 }
 
 func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +186,47 @@ func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, r, http.StatusOK, HeartbeatResponse{Runner: updated, Config: s.agentConfig()})
+	commands, err := s.store.TakeCommands(r.Context(), runner.ID)
+	if err != nil {
+		// The heartbeat itself worked; failing it now would make the runner
+		// look offline over a queue problem.
+		s.log(r).Warn("could not read pending commands",
+			"event", "commands_read_failed", "error", err.Error())
+	}
+
+	pending := make([]PendingCommand, 0, len(commands))
+	for _, c := range commands {
+		pending = append(pending, PendingCommand{ID: c.ID, Command: c.Command})
+	}
+
+	s.writeJSON(w, r, http.StatusOK, HeartbeatResponse{
+		Runner:   updated,
+		Config:   s.agentConfig(),
+		Commands: pending,
+	})
+}
+
+// CommandResultRequest is what an agent reports after trying a command.
+type CommandResultRequest struct {
+	// Error is empty when the command succeeded.
+	Error string `json:"error"`
+}
+
+func (s *Server) handleAgentCommandResult(w http.ResponseWriter, r *http.Request) {
+	runner, _ := runnerFrom(r.Context())
+
+	var req CommandResultRequest
+	if !s.decode(w, r, &req) {
+		return
+	}
+
+	// The runner id is part of the lookup, so one agent cannot close
+	// another's command by guessing an id.
+	if err := s.store.CompleteCommand(r.Context(), runner.ID, r.PathValue("id"), req.Error); err != nil {
+		s.failStore(w, r, err, "that command for this runner")
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, map[string]string{"status": "recorded"})
 }
 
 // EventsRequest is a batch of things that happened between heartbeats.

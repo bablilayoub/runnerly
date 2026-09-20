@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 )
 
@@ -138,6 +139,13 @@ type Options struct {
 // Supervisor runs a process and restarts it when it fails.
 type Supervisor struct {
 	opts Options
+
+	mu sync.Mutex
+	// current is the running process, so Restart can reach it.
+	current Process
+	// restarting marks an exit as one the operator asked for, so it does not
+	// count against the backoff policy.
+	restarting bool
 }
 
 // New returns a Supervisor. It validates the options so a misconfiguration
@@ -185,11 +193,14 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			continue
 		}
 
+		s.setCurrent(proc)
 		s.emit(Event{Kind: EventStarted, Attempt: attempt, PID: proc.PID()})
 		startedAt := time.Now()
 
 		exitErr, shutdown := s.awaitExit(ctx, proc)
 		uptime := time.Since(startedAt)
+		asked := s.takeRestartFlag()
+		s.setCurrent(nil)
 
 		if shutdown {
 			s.emit(Event{Kind: EventStopped, PID: proc.PID(), Uptime: uptime})
@@ -204,6 +215,13 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			Uptime:   uptime,
 			Err:      exitErr,
 		})
+
+		if asked {
+			// An operator asked for this, so it is not a failure: start
+			// again immediately and leave the failure history alone.
+			s.emit(Event{Kind: EventRestarting, Attempt: attempt, Delay: 0})
+			continue
+		}
 
 		if s.opts.Ephemeral && exitErr == nil {
 			// The work is done. This is the whole point of an ephemeral
@@ -281,6 +299,53 @@ func (s *Supervisor) awaitExit(ctx context.Context, proc Process) (exitErr error
 			return nil, true
 		}
 	}
+}
+
+// Restart stops the running process so the supervisor starts it again.
+//
+// It is not counted as a failure: an operator asking for a restart should not
+// push the runner closer to the point where the supervisor gives up, and
+// should not have to wait out a backoff delay.
+//
+// It returns false when nothing is running, which is not an error: a runner
+// waiting out a backoff delay is about to start anyway.
+func (s *Supervisor) Restart() bool {
+	s.mu.Lock()
+	proc := s.current
+	if proc == nil {
+		s.mu.Unlock()
+		return false
+	}
+	s.restarting = true
+	s.mu.Unlock()
+
+	// Stop, not Kill: the runner should finish the job it is on, which is
+	// the same courtesy a shutdown gets.
+	if err := proc.Stop(); err != nil {
+		s.emit(Event{Kind: EventStopping, PID: proc.PID(), Err: err})
+	}
+	return true
+}
+
+func (s *Supervisor) setCurrent(proc Process) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.current = proc
+	if proc != nil {
+		// A restart requested while nothing was running would otherwise
+		// linger and swallow the next real failure.
+		s.restarting = false
+	}
+}
+
+// takeRestartFlag reports whether the exit was an operator's doing, clearing
+// it so it applies to exactly one exit.
+func (s *Supervisor) takeRestartFlag() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	asked := s.restarting
+	s.restarting = false
+	return asked
 }
 
 func (s *Supervisor) emit(e Event) {

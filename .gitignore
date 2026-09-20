@@ -3,6 +3,16 @@
 /coverage.out
 /coverage.html
 
+# The dashboard's build output. The directory itself is tracked, via the
+# .gitkeep, because internal/web embeds it and the Go build must work
+# whether or not the dashboard has been built.
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+
+# Dashboard dependencies and incremental build state
+/web/node_modules/
+*.tsbuildinfo
+
 # Local configuration and runner state
 /.runnerly/
 *.local.yaml

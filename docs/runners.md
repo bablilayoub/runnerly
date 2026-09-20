@@ -162,8 +162,8 @@ is a later milestone.
 ## What is not implemented
 
 - upgrades of the runner or of Runnerly itself
-- the control plane, heartbeats and the dashboard
 - ephemeral lifecycle management
 
-Starting, supervising and restarting are the agent's job and work now; see
-[agent.md](agent.md). For the rest, see [architecture.md](architecture.md).
+Starting, supervising and restarting are the agent's job; see
+[agent.md](agent.md). Tracking a fleet is the control plane's; see
+[server.md](server.md) and [dashboard.md](dashboard.md).

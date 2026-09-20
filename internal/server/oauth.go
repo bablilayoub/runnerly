@@ -33,6 +33,30 @@ func (s *Server) callbackURL() string {
 	return s.publicURL + "/api/v1/auth/github/callback"
 }
 
+// AuthConfigResponse tells the dashboard whether signing in can work.
+//
+// It is public and unauthenticated on purpose: the sign-in page has to know
+// before it offers a button. Without it the page would show one that leads
+// to a 501, which is a worse first impression than saying so up front.
+type AuthConfigResponse struct {
+	SignInAvailable bool   `json:"sign_in_available"`
+	Reason          string `json:"reason,omitempty"`
+	Hint            string `json:"hint,omitempty"`
+}
+
+func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
+	if s.oauthConfigured() && s.publicURL != "" {
+		s.writeJSON(w, r, http.StatusOK, AuthConfigResponse{SignInAvailable: true})
+		return
+	}
+	// Nothing secret here: it names settings, not their values.
+	s.writeJSON(w, r, http.StatusOK, AuthConfigResponse{
+		SignInAvailable: false,
+		Reason:          s.oauthReason(),
+		Hint:            s.oauthHint(),
+	})
+}
+
 func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	if !s.oauthConfigured() || s.publicURL == "" {
 		s.oauthUnavailable(w, r)

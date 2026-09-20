@@ -106,9 +106,8 @@ func (s *Server) oauthConfigured() bool {
 	return s.oauth.ClientID != "" && s.oauth.ClientSecret != ""
 }
 
-// oauthUnavailable explains precisely what is missing, because "OAuth is not
-// configured" sends an operator hunting through documentation.
-func (s *Server) oauthUnavailable(w http.ResponseWriter, r *http.Request) {
+// oauthMissing lists the settings that stop sign-in working.
+func (s *Server) oauthMissing() []string {
 	var missing []string
 	if s.oauth.ClientID == "" {
 		missing = append(missing, "server.oauth.client_id")
@@ -119,11 +118,24 @@ func (s *Server) oauthUnavailable(w http.ResponseWriter, r *http.Request) {
 	if s.publicURL == "" {
 		missing = append(missing, "server.url, which the callback URL is built from")
 	}
+	return missing
+}
 
-	s.fail(w, r, http.StatusNotImplemented, "oauth_not_configured",
-		"Dashboard sign-in is not configured: "+strings.Join(missing, ", ")+" is not set.",
-		"Register a GitHub OAuth App with callback "+s.callbackURL()+
-			" and set those values. Runnerly ships no client credentials of its own.")
+// oauthReason is the sentence shown to whoever hits a sign-in they cannot
+// use. Naming the settings beats "OAuth is not configured", which sends an
+// operator hunting through documentation.
+func (s *Server) oauthReason() string {
+	return "Dashboard sign-in is not configured: " +
+		strings.Join(s.oauthMissing(), ", ") + " is not set."
+}
+
+func (s *Server) oauthHint() string {
+	return "Register a GitHub OAuth App with callback " + s.callbackURL() +
+		" and set those values. Runnerly ships no client credentials of its own."
+}
+
+func (s *Server) oauthUnavailable(w http.ResponseWriter, r *http.Request) {
+	s.fail(w, r, http.StatusNotImplemented, "oauth_not_configured", s.oauthReason(), s.oauthHint())
 }
 
 // newOAuthState returns an unguessable value tying a callback to the request

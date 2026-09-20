@@ -151,8 +151,9 @@ Runnerly refuses to register against a public repository by default. Read
 ## Several machines
 
 Once more than one machine runs a runner, an optional control plane answers
-"what is out there and is it healthy?". Nothing above requires it. See
-[server.md](server.md).
+"what is out there and is it healthy?", with a dashboard to look at it.
+Nothing above requires it. See [server.md](server.md) and
+[dashboard.md](dashboard.md).
 
 ## Next
 
@@ -160,6 +161,7 @@ Once more than one machine runs a runner, an optional control plane answers
 - [Runners](runners.md)
 - [The agent](agent.md)
 - [The control plane](server.md)
+- [The dashboard](dashboard.md)
 - [Configuration](configuration.md)
 - [Security model](security.md) — read this before pointing a runner at a public repository
 - [Troubleshooting](troubleshooting.md)

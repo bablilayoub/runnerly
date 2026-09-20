@@ -189,10 +189,22 @@ The agent reports `starting`, `online`, `stopping`, `offline` and `error`. It
 does not report `busy`: whether a job is running is GitHub's view, and the
 agent would have to guess at it by parsing the runner's output.
 
+## Commands from the control plane
+
+An operator can ask for a restart from the dashboard or the API. The agent
+collects it on its next heartbeat, stops the runner with SIGTERM so a job in
+flight can finish, and lets the supervisor start it again.
+
+A requested restart is not a failure: it does not count against the backoff
+and does not wait one out. The agent reports the outcome, so a command never
+sits unresolved, and a command it does not understand comes back as failed
+rather than being ignored.
+
 ## Not implemented
 - **Ephemeral lifecycle.** `--ephemeral` is passed to `config.sh` and the agent
   stops on a clean exit, but nothing re-creates the runner afterwards, and
   nothing preserves its logs. A crashed ephemeral runner also exits 0, so it is
   indistinguishable from one that finished its job — the agent treats it as
   finished and stops.
-- **Upgrades.** Neither the agent nor the runner updates itself.
+- **Upgrades.** Neither the agent nor the runner updates itself. The command
+  channel could carry it; nothing implements it yet.

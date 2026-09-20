@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -156,10 +157,25 @@ type HeartbeatRequest struct {
 	AgentVersion  string  `json:"agent_version"`
 }
 
-// HeartbeatResponse is what the server believes after the report.
+// PendingCommand is something an operator asked this agent to do.
+type PendingCommand struct {
+	ID      string `json:"id"`
+	Command string `json:"command"`
+}
+
+// CommandRestart asks the agent to stop the runner and start it again.
+//
+// A command an agent does not recognize is reported back as failed rather
+// than silently ignored, so an operator running a newer server against an
+// older agent sees why nothing happened.
+const CommandRestart = "restart"
+
+// HeartbeatResponse is what the server believes after the report, plus
+// anything it wants the agent to do.
 type HeartbeatResponse struct {
-	Runner Runner `json:"runner"`
-	Config Config `json:"config"`
+	Runner   Runner           `json:"runner"`
+	Config   Config           `json:"config"`
+	Commands []PendingCommand `json:"commands,omitempty"`
 }
 
 // Heartbeat reports the agent's state.
@@ -197,6 +213,16 @@ func (c *Client) SendEvents(ctx context.Context, events []Event) (int, error) {
 		return 0, err
 	}
 	return out.Stored, nil
+}
+
+// CompleteCommand reports the outcome of a command. An empty failure means
+// it succeeded.
+func (c *Client) CompleteCommand(ctx context.Context, id, failure string) error {
+	body := struct {
+		Error string `json:"error"`
+	}{Error: failure}
+	return c.do(ctx, http.MethodPost, "/api/v1/agent/commands/"+url.PathEscape(id)+"/result",
+		c.token, body, nil)
 }
 
 // Health checks that the control plane is reachable. It needs no credential.

@@ -36,7 +36,7 @@ runner running.
 | `runnerly agent run` / `status` / `systemd` | works |
 | Automatic restart with backoff, systemd service | works |
 | `runnerly-server`: enrollment, heartbeats, events, API | works |
-| Web dashboard | not implemented |
+| Web dashboard: overview, runners, events, restart, remove | works |
 | Upgrades and ephemeral lifecycle | not implemented |
 
 A runner installed here stays up: the agent restarts it when it fails, and
@@ -161,7 +161,19 @@ runnerly agent run
 ```
 
 The agent trades that one-shot token for a credential of its own and starts
-reporting. Details in [docs/server.md](docs/server.md).
+reporting. The dashboard is served by the same binary at `/`:
+
+```text
+Runners
+  3 total   1 online   1 busy   1 offline
+
+runnerly-01   ● online   bablilayoub/runnerly   linux/x64   28s ago
+runnerly-02   ● busy     bablilayoub/runnerly   linux/x64   28s ago
+build-arm-01  ○ offline  acme/widgets           linux/arm64  never
+```
+
+Details in [docs/server.md](docs/server.md) and
+[docs/dashboard.md](docs/dashboard.md).
 
 ## Configuration
 
@@ -193,6 +205,7 @@ directory.
 - [Runners](docs/runners.md)
 - [The agent](docs/agent.md)
 - [The control plane](docs/server.md)
+- [The dashboard](docs/dashboard.md)
 - [Configuration](docs/configuration.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

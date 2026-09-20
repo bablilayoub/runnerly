@@ -488,3 +488,104 @@ func TestExitCode(t *testing.T) {
 		t.Errorf("ExitCode() = %d, want 3", got)
 	}
 }
+
+func TestRestartDoesNotCountAsAFailure(t *testing.T) {
+	var rec recorder
+	var starts atomic.Int32
+	procs := make(chan *fakeProcess, 8)
+
+	// One restart allowed. If an operator's restart counted as a failure,
+	// the run would end after the second start.
+	s, err := New(Options{
+		Process: ProcessOptions{Command: "./run.sh"},
+		Backoff: fastBackoff(1),
+		OnEvent: rec.add,
+		Start: func(ProcessOptions) (Process, error) {
+			starts.Add(1)
+			p := newFakeProcess(int(starts.Load())).honorsStop()
+			procs <- p
+			return p, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	// Ask for three restarts in a row; none may count against the policy.
+	for i := 1; i <= 3; i++ {
+		select {
+		case <-procs:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("process %d never started", i)
+		}
+		deadline := time.After(2 * time.Second)
+		for !s.Restart() {
+			select {
+			case <-deadline:
+				t.Fatal("Restart() never found a running process")
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+
+	select {
+	case <-procs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the runner was not started again after the third restart")
+	}
+	cancel()
+
+	if err := <-done; err != nil {
+		t.Errorf("Run() = %v, want nil; restarts must not exhaust the backoff", err)
+	}
+	if got := int(starts.Load()); got < 4 {
+		t.Errorf("started %d times, want at least 4", got)
+	}
+	if rec.count(EventGaveUp) != 0 {
+		t.Errorf("the supervisor gave up on operator-requested restarts: %v", rec.kinds())
+	}
+}
+
+func TestRestartWithNothingRunningIsNotAnError(t *testing.T) {
+	s, err := New(Options{
+		Process: ProcessOptions{Command: "./run.sh"},
+		Backoff: fastBackoff(1),
+		Start: func(ProcessOptions) (Process, error) {
+			return newFakeProcess(1).exitsWith(errors.New("crashed")), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never started, so there is nothing to stop.
+	if s.Restart() {
+		t.Error("Restart() = true with no process running")
+	}
+}
+
+func TestARestartRequestedWhileStoppedDoesNotLeak(t *testing.T) {
+	// A stale flag would make the next real crash look intentional and skip
+	// the backoff that is meant to slow a crash loop down.
+	s, err := New(Options{
+		Process: ProcessOptions{Command: "./run.sh"},
+		Backoff: fastBackoff(1),
+		Start: func(ProcessOptions) (Process, error) {
+			return newFakeProcess(1).exitsWith(errors.New("crashed")), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	s.restarting = true
+	s.mu.Unlock()
+
+	if err := s.Run(context.Background()); !errors.Is(err, ErrGaveUp) {
+		t.Errorf("Run() = %v, want ErrGaveUp: a stale restart flag hid a crash loop", err)
+	}
+}

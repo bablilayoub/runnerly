@@ -32,7 +32,7 @@ and manages its lifecycle.
 | CLI | `runnerly` | doctor, config, auth, repo, runner and agent commands |
 | Runner agent | `runnerly-agent` | supervision, restart backoff, systemd |
 | Control plane | `runnerly-server` | enrollment, heartbeats, events, API |
-| Dashboard | web | not implemented |
+| Dashboard | embedded in `runnerly-server` | overview, runners, events, restart, remove |
 
 The control plane is optional at every layer. The CLI works without one, and
 so does the agent: with no `server.url` configured it supervises its runner
@@ -64,6 +64,8 @@ internal/store/      the control plane's PostgreSQL layer, and the schema
 internal/supervisor/ keeping a child process alive
 internal/ui/         terminal output: symbols, color, tables, indentation
 internal/version/    build information, injected via -ldflags
+internal/web/        serving the embedded dashboard
+web/                 the dashboard itself: React, TypeScript, Tailwind
 deploy/systemd/      a reference service unit
 docs/                this documentation
 ```
@@ -112,6 +114,33 @@ answers "what am I supervising?" without inferring it. It is also what lets
 `runner list`, `runner remove` and the agent work without `--repo` on a machine
 with one runner.
 
+## Why commands travel on the heartbeat
+
+The control plane cannot reach an agent. Runner machines sit behind NAT and
+firewalls, and requiring an inbound port on every one of them would be a
+worse trade than a short delay. So `restart` is queued and handed over on the
+next heartbeat, and every surface that exposes it — the API response, the
+dashboard's confirmation — says so rather than implying it was instant.
+
+That also bounds the blast radius of a command an agent does not understand:
+it reports the command back as failed instead of ignoring it, so a newer
+server against an older agent produces a visible failure rather than silence.
+
+## Why the dashboard is embedded
+
+`runnerly-server` serves the built assets from its own binary, so a
+deployment is one process with no static host to configure.
+
+The Go build does not depend on Node. When the dashboard has not been built,
+`internal/web/dist` holds only a placeholder and the server serves a page
+saying so; the API is unaffected. That keeps `go build ./...` working for
+anyone touching the backend, and keeps the UI out of the critical path for a
+server that is only ever hit by agents.
+
+`web/` carries its own `go.mod`. It contains no Go code, but npm packages
+occasionally vendor some, and without a module boundary `go build ./...`
+would compile a dependency's Go source as part of Runnerly.
+
 ## Why the agent declares its own wire types
 
 `internal/controlplane` does not import `internal/server`, even though they
@@ -146,11 +175,10 @@ cannot see this", and saying that is worth more than forwarding "Not Found".
 
 Roughly in order:
 
-1. **Dashboard** — React and TypeScript, monochrome, minimal, on the API that
-   now exists. Restart and upgrade commands belong here too: both need a
-   command channel from server to agent, worth designing alongside the UI that
-   would drive it.
-2. **Docker executor**, then **ephemeral runners**.
+1. **Docker executor**, then **ephemeral runners**.
+2. **Upgrades** — the command channel now exists to carry them; what is
+   missing is deciding and testing what an unattended runner upgrade should
+   actually do.
 
 Deliberately out of scope until the above is solid: Kubernetes, autoscaling,
 cloud provisioning, GPU scheduling, Windows and macOS runners, and local
@@ -158,10 +186,15 @@ workflow execution.
 
 ## Dependency policy
 
-Three direct dependencies: `spf13/cobra` for the command tree,
+Three direct Go dependencies: `spf13/cobra` for the command tree,
 `gopkg.in/yaml.v3` for configuration, and `jackc/pgx` for PostgreSQL. Terminal
 color, terminal detection, HTTP routing, migrations, UUIDs and cryptography
 are handled with the standard library.
+
+The dashboard has three: `react`, `react-dom` and `react-router-dom`. Styling
+is Tailwind with no component library: a monochrome interface of tables,
+badges and two dialogs does not need headless primitives, and the one dialog
+that needs focus trapping uses the browser's own `<dialog>`.
 
 `pgx` was added because speaking the PostgreSQL wire protocol is not something
 to hand-write. Migrations were not: a forward-only runner over embedded SQL is

@@ -24,6 +24,7 @@ import (
 	"github.com/bablilayoub/runnerly/internal/server"
 	"github.com/bablilayoub/runnerly/internal/store"
 	"github.com/bablilayoub/runnerly/internal/version"
+	"github.com/bablilayoub/runnerly/internal/web"
 )
 
 // Environment variables that override the configuration file, so a
@@ -39,6 +40,11 @@ const (
 
 // shutdownGrace is how long in-flight requests get to finish on stop.
 const shutdownGrace = 20 * time.Second
+
+// staleCommandAge is how long a command may wait before it is given up on.
+// An agent that has not collected one within an hour is not coming back for
+// it, and a dashboard showing "pending" for ever helps nobody.
+const staleCommandAge = time.Hour
 
 func main() {
 	os.Exit(run())
@@ -160,6 +166,14 @@ func run() int {
 		IdleTimeout:       2 * time.Minute,
 	}
 
+	if web.Available() {
+		log.Info("serving the dashboard", "event", "dashboard_available")
+	} else {
+		log.Info("this binary has no dashboard; the API is unaffected",
+			"event", "dashboard_missing",
+			"hint", "run `make web` before `make build`, or use a release binary")
+	}
+
 	go housekeeping(ctx, db, log, cfg.Server.EventRetentionDays)
 
 	errs := make(chan error, 1)
@@ -205,6 +219,13 @@ func housekeeping(ctx context.Context, db *store.Store, log *slog.Logger, retent
 				log.Warn("could not prune sessions", "event", "prune_failed", "error", err.Error())
 			} else if n > 0 {
 				log.Info("pruned expired sessions", "event", "sessions_pruned", "count", n)
+			}
+
+			if n, err := db.ExpireStaleCommands(ctx, staleCommandAge); err != nil {
+				log.Warn("could not expire stale commands", "event", "prune_failed", "error", err.Error())
+			} else if n > 0 {
+				log.Info("expired commands no agent collected",
+					"event", "commands_expired", "count", n)
 			}
 
 			if retentionDays > 0 {

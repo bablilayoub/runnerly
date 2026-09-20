@@ -36,6 +36,9 @@ type reporter struct {
 	dropped      int
 
 	events chan controlplane.Event
+	// restart is called when the control plane asks for one. Nil means the
+	// agent cannot honor the command and says so rather than dropping it.
+	restart func() bool
 }
 
 // Runner statuses the agent can actually observe.
@@ -233,7 +236,12 @@ func (r *reporter) heartbeat() {
 	ctx, cancel := sendContext()
 	defer cancel()
 
-	if _, err := r.client.Heartbeat(ctx, req); err != nil {
+	resp, err := r.client.Heartbeat(ctx, req)
+	if err == nil {
+		r.runCommands(resp.Commands)
+		return
+	}
+	if err != nil {
 		if errors.Is(err, controlplane.ErrUnauthorized) {
 			// Retrying will not help, so say so plainly and stop trying to
 			// dress it up as a transient failure.
@@ -243,6 +251,47 @@ func (r *reporter) heartbeat() {
 		}
 		r.log.Warn("could not send a heartbeat",
 			"event", "report_failed", "error", err.Error())
+	}
+}
+
+// runCommands carries out what the control plane asked for and reports each
+// outcome, so a command never sits "delivered" for ever.
+func (r *reporter) runCommands(commands []controlplane.PendingCommand) {
+	for _, c := range commands {
+		failure := r.runCommand(c)
+
+		ctx, cancel := sendContext()
+		if err := r.client.CompleteCommand(ctx, c.ID, failure); err != nil {
+			r.log.Warn("could not report a command result",
+				"event", "command_result_failed", "command", c.Command, "error", err.Error())
+		}
+		cancel()
+	}
+}
+
+// runCommand performs one command and returns why it failed, or "".
+func (r *reporter) runCommand(c controlplane.PendingCommand) string {
+	switch c.Command {
+	case controlplane.CommandRestart:
+		if r.restart == nil {
+			return "this agent cannot restart its runner"
+		}
+		r.log.Info("restarting the runner because the control plane asked",
+			"event", "restart_requested", "command", c.ID)
+
+		if !r.restart() {
+			// Nothing was running, which usually means it is already
+			// between attempts and about to start anyway.
+			return ""
+		}
+		return ""
+
+	default:
+		// A newer server may know commands this agent does not. Saying so
+		// beats leaving the operator watching a command that never moves.
+		r.log.Warn("the control plane asked for something this agent does not understand",
+			"event", "unknown_command", "command", c.Command)
+		return "this agent does not understand the command " + c.Command
 	}
 }
 

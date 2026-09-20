@@ -111,6 +111,13 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	// The supervisor exists now, so a restart command has something to act
+	// on. Wiring it after construction avoids a reference cycle between the
+	// two.
+	if report != nil {
+		report.restart = sup.Restart
+	}
+
 	log.Info("agent started",
 		"event", "agent_started",
 		"dir", opts.Runner.Dir,

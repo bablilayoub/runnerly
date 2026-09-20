@@ -19,6 +19,7 @@ import (
 	"github.com/bablilayoub/runnerly/internal/secret"
 	"github.com/bablilayoub/runnerly/internal/store"
 	"github.com/bablilayoub/runnerly/internal/version"
+	"github.com/bablilayoub/runnerly/internal/web"
 )
 
 // Component names this server in logs.
@@ -169,8 +170,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", s.requireMachine(s.handleAgentHeartbeat))
 	mux.HandleFunc("POST /api/v1/agent/events", s.requireMachine(s.handleAgentEvents))
 	mux.HandleFunc("GET /api/v1/agent/config", s.requireMachine(s.handleAgentConfig))
+	mux.HandleFunc("POST /api/v1/agent/commands/{id}/result", s.requireMachine(s.handleAgentCommandResult))
 
 	// Dashboard sign-in.
+	mux.HandleFunc("GET /api/v1/auth/config", s.handleAuthConfig)
 	mux.HandleFunc("GET /api/v1/auth/github", s.handleAuthStart)
 	mux.HandleFunc("GET /api/v1/auth/github/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleAuthLogout)
@@ -181,6 +184,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/runners", s.requireUser(s.handleListRunners))
 	mux.HandleFunc("GET /api/v1/runners/{id}", s.requireUser(s.handleGetRunner))
 	mux.HandleFunc("DELETE /api/v1/runners/{id}", s.requireUser(s.handleDeleteRunner))
+	mux.HandleFunc("POST /api/v1/runners/{id}/restart", s.requireUser(s.handleRestartRunner))
+	mux.HandleFunc("GET /api/v1/runners/{id}/commands", s.requireUser(s.handleListCommands))
 	mux.HandleFunc("GET /api/v1/events", s.requireUser(s.handleListEvents))
 
 	// Enrollment tokens are operator tools, so they need a signed-in user.
@@ -188,7 +193,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/enrollment-tokens", s.requireUser(s.handleCreateEnrollmentToken))
 	mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", s.requireUser(s.handleRevokeEnrollmentToken))
 
-	mux.HandleFunc("/", s.handleNotFound)
+	// An unknown path under /api is an API error, not a page. Anything else
+	// belongs to the dashboard's own router.
+	mux.HandleFunc("/api/", s.handleNotFound)
+	mux.Handle("/", web.Handler())
 
 	return s.withRecovery(s.withRequestLog(mux))
 }
