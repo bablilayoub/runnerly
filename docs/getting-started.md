@@ -15,10 +15,15 @@ retires runners so you do not do those steps by hand.
 ## What works today
 
 - `runnerly doctor` — tells you whether a machine can host a runner
+- `runnerly login` — stores a GitHub token
+- `runnerly repo list` — finds repositories you can attach a runner to
+- `runnerly runner create` — installs and registers a real runner
+- `runnerly runner list` / `status` / `remove` — manages registrations
 - `runnerly config` — creates and inspects the configuration file
 - `runnerly version` — build information
 
-Registering runners with GitHub is not implemented yet. See
+Runnerly does not yet start or supervise the runner process. After
+`runner create`, you run `./run.sh` yourself. See
 [architecture.md](architecture.md) for the plan.
 
 ## Install
@@ -86,8 +91,52 @@ runnerly config validate
 
 Every field is documented in [configuration.md](configuration.md).
 
+## Authenticate with GitHub
+
+Create a personal access token with the `repo` scope, then:
+
+```bash
+echo "$GITHUB_TOKEN" | runnerly login --with-token
+runnerly auth status
+```
+
+The token is read from standard input, not a flag, so it stays out of your
+shell history. To keep it off disk entirely, set `RUNNERLY_GITHUB_TOKEN`
+instead — an environment token always wins.
+
+## Register a runner
+
+```bash
+runnerly repo list
+runnerly runner create --repo owner/repo
+```
+
+Runnerly asks GitHub for a short-lived registration token, downloads the runner
+release GitHub expects, verifies its checksum, unpacks it, and registers it.
+Then start it:
+
+```bash
+cd ~/.local/share/runnerly/runners/<name> && ./run.sh
+```
+
+Push a workflow that targets it:
+
+```yaml
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "running on $(hostname)"
+```
+
+Runnerly refuses to register against a public repository by default. Read
+[security.md](security.md) before overriding that.
+
 ## Next
 
+- [GitHub integration](github.md)
+- [Runners](runners.md)
 - [Configuration](configuration.md)
 - [Security model](security.md) — read this before pointing a runner at a public repository
 - [Troubleshooting](troubleshooting.md)

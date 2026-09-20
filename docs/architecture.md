@@ -29,10 +29,14 @@ and manages its lifecycle.
 
 | Component | Binary | State |
 | --- | --- | --- |
-| CLI | `runnerly` | `version`, `doctor`, `config` implemented |
+| CLI | `runnerly` | doctor, config, auth, repo and runner commands implemented |
 | Runner agent | `runnerly-agent` | not implemented |
 | Control plane | `runnerly-server` | not implemented |
 | Dashboard | web | not implemented |
+
+The CLI installs and registers runners today. Keeping them running is the
+agent's job and does not exist yet, which is why `runner create` stops after
+registration and tells you to start the process yourself.
 
 The control plane is optional by design. The CLI must stay useful on a machine
 that has never seen a server — `doctor` skips server-dependent checks rather
@@ -41,11 +45,14 @@ than failing them.
 ## Code layout
 
 ```text
-cmd/runnerly/      CLI entry point; main() only
+cmd/runnerly/        CLI entry point; main() only
 internal/cli/        cobra command tree, flag parsing, exit codes
+internal/auth/       GitHub credential resolution and storage
 internal/config/     configuration schema, loading, validation
 internal/doctor/     machine diagnostics and their rendering
-internal/ui/         terminal output: symbols, color, indentation
+internal/github/     a narrow GitHub REST client
+internal/runner/     installing and configuring actions/runner
+internal/ui/         terminal output: symbols, color, tables, indentation
 internal/version/    build information, injected via -ldflags
 docs/                this documentation
 ```
@@ -59,7 +66,12 @@ Rules that keep the layers honest:
 - Packages that touch the machine or the network take their dependencies as a
   struct of function fields (see `doctor.Env`) so tests substitute fakes
   instead of mutating the machine.
-- `internal/config` is a leaf: it imports nothing from the rest of the project.
+- `internal/config` and `internal/github` are leaves: neither imports anything
+  else from the project, so neither can be pulled into a dependency cycle by a
+  later feature.
+- `internal/github` is not a general-purpose GitHub library. It covers the six
+  endpoints Runnerly needs, so every error it returns can say something useful
+  about Runnerly's situation rather than repeating GitHub's message.
 
 ## Why the doctor package looks the way it does
 
@@ -72,20 +84,25 @@ or make HTTP calls.
 Each `Check` carries a `Detail` (what was found) and a `Remedy` (what to type).
 A failing check without a remedy is a bug.
 
+## Why the GitHub client is hand-written
+
+Two direct dependencies is the bar (see below), and Runnerly uses six GitHub
+endpoints. A full client library would add a large dependency to save a few
+hundred lines, and would hand back GitHub's own error messages — which are
+rarely actionable. A 404 from a runner endpoint almost always means "your token
+cannot see this", and saying that is worth more than forwarding "Not Found".
+
 ## Planned
 
 Roughly in order:
 
-1. **GitHub integration** — authentication, repository discovery, registration
-   tokens, runner create/list/remove. The acceptance test is
-   `runnerly runner create --repo owner/repo` producing a visible runner in
-   GitHub.
-2. **Runner agent** — enrollment, heartbeat, runner supervision, restart with
-   exponential backoff, systemd unit.
-3. **Control plane** — Postgres-backed inventory, runner events, agent
+1. **Runner agent** — enrollment, heartbeat, runner supervision, restart with
+   exponential backoff, systemd unit. This is what turns a registered runner
+   into one that stays up.
+2. **Control plane** — Postgres-backed inventory, runner events, agent
    endpoints, machine tokens.
-4. **Dashboard** — React and TypeScript, monochrome, minimal.
-5. **Docker executor**, then **ephemeral runners**.
+3. **Dashboard** — React and TypeScript, monochrome, minimal.
+4. **Docker executor**, then **ephemeral runners**.
 
 Deliberately out of scope until the above is solid: Kubernetes, autoscaling,
 cloud provisioning, GPU scheduling, Windows and macOS runners, and local

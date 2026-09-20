@@ -74,6 +74,9 @@ type GitHub struct {
 type Runner struct {
 	Name   string   `yaml:"name"`
 	Labels []string `yaml:"labels"`
+	// Dir is where the official GitHub runner is installed. Empty means the
+	// default for the current user, which DefaultRunnerDir computes.
+	Dir string `yaml:"dir"`
 }
 
 // Executor selects the execution mode.
@@ -127,6 +130,35 @@ func defaultLabels() []string {
 		arch = "x64"
 	}
 	return []string{runtime.GOOS, arch, "runnerly"}
+}
+
+// DefaultRunnerDir returns where the official GitHub runner is installed when
+// runner.dir is empty.
+//
+// Root installs system-wide so a systemd unit can find it; an unprivileged
+// user installs under their own data directory, because Runnerly never writes
+// outside what the invoking user already owns.
+func DefaultRunnerDir() string {
+	if os.Geteuid() == 0 {
+		return "/opt/runnerly/runners"
+	}
+	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+		return filepath.Join(dir, "runnerly", "runners")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "runnerly", "runners")
+	}
+	return filepath.Join(home, ".local", "share", "runnerly", "runners")
+}
+
+// RunnerDir returns the directory a named runner is installed in.
+func (c Config) RunnerDir(name string) string {
+	base := c.Runner.Dir
+	if base == "" {
+		base = DefaultRunnerDir()
+	}
+	return filepath.Join(base, name)
 }
 
 // Path returns the configuration file path that Load would read when given an

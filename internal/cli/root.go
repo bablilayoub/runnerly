@@ -2,14 +2,19 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/config"
+	"github.com/bablilayoub/runnerly/internal/github"
+	"github.com/bablilayoub/runnerly/internal/runner"
 	"github.com/bablilayoub/runnerly/internal/ui"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
@@ -24,10 +29,40 @@ func (e *ExitError) Error() string { return fmt.Sprintf("exit status %d", e.Code
 // env carries the process-wide state a command needs. It is a struct so tests
 // can run commands against buffers instead of the real streams.
 type env struct {
-	out        io.Writer
-	errOut     io.Writer
+	in     io.Reader
+	out    io.Writer
+	errOut io.Writer
+
+	// interactive is true when stdin is a terminal, so a command may prompt.
+	interactive bool
+
 	configPath string
 	noColor    bool
+	token      string
+
+	// newGitHubClient builds the API client. It is a field so tests can point
+	// the whole command tree at a fake GitHub without a network.
+	newGitHubClient func(host, token string) *github.Client
+	// runnerEnv is how the CLI reaches the machine when installing a runner.
+	// Tests replace it so no archive is downloaded and no script is executed.
+	runnerEnv func() runner.Env
+}
+
+// newEnv returns the default environment, wired to the real GitHub.
+func newEnv(in io.Reader, out, errOut io.Writer) *env {
+	e := &env{
+		in:     in,
+		out:    out,
+		errOut: errOut,
+		newGitHubClient: func(host, token string) *github.Client {
+			return github.NewForHost(host, token)
+		},
+		runnerEnv: runner.DefaultEnv,
+	}
+	if f, ok := in.(*os.File); ok {
+		e.interactive = ui.IsTerminal(f)
+	}
+	return e
 }
 
 // printer returns a Printer for stdout honoring the --no-color flag.
@@ -38,21 +73,115 @@ func (e *env) printer() *ui.Printer {
 	return ui.New(e.out)
 }
 
+// resolvedConfigPath returns the config file this invocation uses.
+func (e *env) resolvedConfigPath() string {
+	if e.configPath != "" {
+		return e.configPath
+	}
+	return config.Path()
+}
+
 // loadConfig resolves and reads the configuration, reporting which path was
 // used so commands can tell the operator.
 func (e *env) loadConfig() (cfg config.Config, path string, found bool, err error) {
-	path = e.configPath
-	if path == "" {
-		path = config.Path()
-	}
+	path = e.resolvedConfigPath()
 	cfg, found, err = config.Load(path)
 	return cfg, path, found, err
 }
 
-// NewRootCommand builds the command tree writing to the given streams.
-func NewRootCommand(out, errOut io.Writer) *cobra.Command {
-	e := &env{out: out, errOut: errOut}
+// credentialsPath returns the credentials file beside the configuration.
+func (e *env) credentialsPath() string {
+	return auth.Path(e.resolvedConfigPath())
+}
 
+// githubToken resolves a credential without contacting GitHub.
+func (e *env) githubToken(host string) (auth.Token, error) {
+	return auth.Resolve(e.credentialsPath(), host, e.token, os.Getenv)
+}
+
+// githubClient returns a client for the configured host, and the token it
+// used, so commands can tell the operator where the credential came from.
+func (e *env) githubClient() (*github.Client, config.Config, auth.Token, error) {
+	cfg, _, _, err := e.loadConfig()
+	if err != nil {
+		return nil, cfg, auth.Token{}, err
+	}
+	token, err := e.githubToken(cfg.GitHub.Host)
+	if err != nil {
+		return nil, cfg, auth.Token{}, err
+	}
+	return e.newGitHubClient(cfg.GitHub.Host, token.Value), cfg, token, nil
+}
+
+// scopeFlags are the flags every runner command uses to say where runners
+// live. Empty values fall back to the configuration file.
+type scopeFlags struct {
+	repo string
+	org  string
+}
+
+func (s *scopeFlags) register(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&s.repo, "repo", "", "repository in owner/repo form")
+	cmd.Flags().StringVar(&s.org, "org", "", "organization login (runners shared across its repositories)")
+	cmd.MarkFlagsMutuallyExclusive("repo", "org")
+}
+
+// resolve turns the flags plus the configuration into a scope.
+func (s *scopeFlags) resolve(cfg config.Config) (github.Scope, error) {
+	switch {
+	case s.repo != "":
+		return github.ParseRepository(s.repo)
+	case s.org != "":
+		scope := github.ForOrganization(s.org)
+		return scope, scope.Validate()
+	}
+
+	switch cfg.GitHub.Scope {
+	case config.ScopeOrganization:
+		if cfg.GitHub.Organization == "" {
+			return github.Scope{}, errors.New(
+				"github.scope is organization but github.organization is empty.\n" +
+					"Set it in the configuration, or pass --org")
+		}
+		scope := github.ForOrganization(cfg.GitHub.Organization)
+		return scope, scope.Validate()
+	default:
+		if cfg.GitHub.Repository == "" {
+			return github.Scope{}, errors.New(
+				"no repository or organization was given.\n" +
+					"Pass --repo owner/repo, or set github.repository in the configuration")
+		}
+		return github.ParseRepository(cfg.GitHub.Repository)
+	}
+}
+
+// confirm asks the operator to approve an action that cannot be undone from
+// the CLI. It refuses rather than assuming yes when it cannot ask.
+func confirm(in io.Reader, out io.Writer, interactive bool, prompt string) (bool, error) {
+	if !interactive {
+		return false, fmt.Errorf("%s\nThis cannot be undone, and there is no terminal to confirm on.\n"+
+			"Re-run with --yes if you are sure", prompt)
+	}
+	fmt.Fprintf(out, "%s [y/N]: ", prompt)
+
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// NewRootCommand builds the command tree wired to the given streams.
+func NewRootCommand(in io.Reader, out, errOut io.Writer) *cobra.Command {
+	return newRootCommand(newEnv(in, out, errOut))
+}
+
+func newRootCommand(e *env) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "runnerly",
 		Short: "Run GitHub Actions on your own infrastructure",
@@ -66,11 +195,13 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	root.SetOut(out)
-	root.SetErr(errOut)
+	root.SetOut(e.out)
+	root.SetErr(e.errOut)
 	root.PersistentFlags().StringVar(&e.configPath, "config", "",
 		"path to config.yaml (default: $RUNNERLY_CONFIG, else ~/.config/runnerly/config.yaml)")
 	root.PersistentFlags().BoolVar(&e.noColor, "no-color", false, "disable colored output")
+	root.PersistentFlags().StringVar(&e.token, "token", "",
+		"GitHub token (prefer RUNNERLY_GITHUB_TOKEN; a flag is visible in shell history and process listings)")
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.Version = version.Get().Short()
 
@@ -78,13 +209,18 @@ func NewRootCommand(out, errOut io.Writer) *cobra.Command {
 		newVersionCommand(e),
 		newDoctorCommand(e),
 		newConfigCommand(e),
+		newLoginCommand(e),
+		newLogoutCommand(e),
+		newAuthCommand(e),
+		newRepoCommand(e),
+		newRunnerCommand(e),
 	)
 	return root
 }
 
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
-	root := NewRootCommand(os.Stdout, os.Stderr)
+	root := NewRootCommand(os.Stdin, os.Stdout, os.Stderr)
 	err := root.Execute()
 	if err == nil {
 		return 0

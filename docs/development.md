@@ -63,6 +63,41 @@ Other conventions:
   `NewRootCommand(out, errOut)`. No subprocess, no global state.
 - Use `t.TempDir()` and `t.Setenv()`; never write to a real home directory.
 
+## The injection seams
+
+Three packages reach outside the process, and each takes its dependencies as a
+struct of function fields so tests never touch the machine or the network:
+
+| Package | Seam | Replaced in tests with |
+| --- | --- | --- |
+| `internal/doctor` | `doctor.Env` | fake `LookPath`, `Run`, `Dial`, HTTP client |
+| `internal/runner` | `runner.Env` | fake `Run`; an `httptest` server for downloads |
+| `internal/cli` | `env.newGitHubClient`, `env.runnerEnv` | a client pointed at `httptest` |
+
+The CLI seams are why command tests exercise the real cobra tree: `newEnv` and
+`newRootCommand` are separate, so a test builds an environment, swaps the two
+fields, and runs actual arguments through actual flag parsing.
+
+```go
+opts := []option{withGitHub(t, handler), withRunnerEnv(&commands)}
+out, _, err := runCLI(t, opts, "--config", cfg, "runner", "create", "--repo", "acme/widgets")
+```
+
+## Adding a GitHub endpoint
+
+`internal/github` is deliberately narrow. When adding a call:
+
+1. Put the request in the file for its resource (`runners.go`, `repos.go`).
+2. Go through `c.do`, which sets the API version, handles auth, and turns a
+   non-2xx response into an `*Error`. It returns headers, not the response —
+   the body is already consumed and closed.
+3. Wrap the error with what Runnerly was trying to do:
+   `fmt.Errorf("list runners for %s: %w", scope, err)`.
+4. If the failure needs explaining beyond GitHub's own message, extend
+   `Error.Hint` rather than the call site, so every endpoint benefits.
+5. Test it against an `httptest` server, asserting the path and method. Several
+   endpoints differ only by path, and that is exactly where a typo hides.
+
 ## Adding a doctor check
 
 1. Write `checkThing(...) Check` in `internal/doctor`. Take what you need from

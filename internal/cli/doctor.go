@@ -29,10 +29,16 @@ func newDoctorCommand(e *env) *cobra.Command {
 				return err
 			}
 
+			// A missing credential is a warning inside the report, not a
+			// reason to refuse to run: doctor must work before login.
+			token, _ := e.githubToken(cfg.GitHub.Host)
+
 			report := doctor.Run(cmd.Context(), doctor.Options{
 				Config:      cfg,
 				ConfigPath:  path,
 				ConfigFound: found,
+				Token:       token.Value,
+				TokenOrigin: token.Origin,
 				Offline:     offline,
 				Timeout:     timeout,
 				Env:         doctor.DefaultEnv(),

@@ -114,6 +114,93 @@ NO_COLOR=1 runnerly doctor
 Expected on macOS. The CLI works for development; register runners from Linux.
 This is a warning, not a failure, so the exit code is still `0`.
 
+## GitHub says 404 for a repository that exists
+
+```text
+Error: list runners for acme/widgets: GitHub returned 404: Not Found
+It does not exist, or the token cannot see it.
+```
+
+GitHub returns 404 rather than 403 for resources a token may not access, so a
+private repository you cannot administer looks identical to one that is not
+there. Check:
+
+```bash
+runnerly auth status          # is the right account in use?
+runnerly repo list acme       # can the token see it at all?
+```
+
+Registering repository runners needs the `repo` scope on a classic token, or
+Administration: read and write on a fine-grained one.
+
+## GitHub says 403
+
+Two different problems share this status. Runnerly's message distinguishes
+them:
+
+- *"The rate limit resets at ..."* — wait, or authenticate. Unauthenticated
+  requests get 60 per hour.
+- *"The token needs one of these scopes: ..."* — create a token with the scope
+  listed and run `runnerly login` again.
+
+## The wrong token is being used
+
+```bash
+runnerly auth status
+```
+
+It names the source. Environment variables beat the stored credential, in this
+order: `RUNNERLY_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`. A `GITHUB_TOKEN`
+exported for another tool is the usual surprise.
+
+## runner create refuses a public repository
+
+```text
+Error: acme/widgets is a public repository, and
+security.allow_public_repositories is false.
+```
+
+Deliberate. A self-hosted runner executes workflow code, so on a public
+repository anyone who can get a workflow to run can run commands on that
+machine. Read [security.md](security.md). If you still want it, pass
+`--allow-public` or set the policy in the configuration.
+
+## runner create says the directory is already configured
+
+```text
+Error: ...: this directory already holds a configured runner.
+```
+
+Reconfiguring in place would orphan the existing registration in GitHub. Either
+retire the old runner:
+
+```bash
+runnerly runner remove <name>
+rm -rf ~/.local/share/runnerly/runners/<name>
+```
+
+or pass `--replace` to take over the registration. `--replace` reuses the
+unpacked runner, so it does not download the release again.
+
+## A download fails verification
+
+```text
+Error: actions-runner-linux-x64-2.x.x.tar.gz failed verification.
+```
+
+The file was deleted rather than executed. Retry — a truncated download is the
+common cause. If it fails again with a consistent mismatch, stop and
+investigate: something between you and GitHub is altering the file.
+
+## A runner shows offline right after creating it
+
+Expected. `runnerly runner create` registers the runner but does not start it.
+Runnerly does not supervise runner processes yet:
+
+```bash
+cd ~/.local/share/runnerly/runners/<name> && ./run.sh
+```
+
 ## Reporting a bug
 
 Include:

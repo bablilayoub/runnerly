@@ -152,7 +152,13 @@ func colorEnabled(w io.Writer, getenv func(string) string) bool {
 
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
-	if !ok {
+	return ok && IsTerminal(f)
+}
+
+// IsTerminal reports whether f is attached to a terminal. It is used to decide
+// whether prompting for confirmation is possible, and whether to emit color.
+func IsTerminal(f *os.File) bool {
+	if f == nil {
 		return false
 	}
 	info, err := f.Stat()

@@ -56,10 +56,15 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// okServer answers every request with 200 and a body that also satisfies the
+// credentials check, so a test only has to break the one thing it is about.
 func okServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-OAuth-Scopes", "repo, workflow")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"login":"octocat"}`))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -80,6 +85,7 @@ func TestRunHealthyMachinePasses(t *testing.T) {
 	srv := okServer(t)
 	report := Run(context.Background(), Options{
 		Config: config.Default(),
+		Token:  "ghp_test",
 		Env:    healthyEnv(t, srv.URL),
 	})
 
@@ -305,19 +311,6 @@ func TestInvalidConfigurationFails(t *testing.T) {
 	}
 }
 
-func TestAPIBaseURL(t *testing.T) {
-	tests := map[string]string{
-		"":                "https://api.github.com",
-		"github.com":      "https://api.github.com",
-		"github.acme.com": "https://github.acme.com/api/v3",
-	}
-	for host, want := range tests {
-		if got := APIBaseURL(host); got != want {
-			t.Errorf("APIBaseURL(%q) = %q, want %q", host, got, want)
-		}
-	}
-}
-
 func TestRenderExplainsFailuresButNotPasses(t *testing.T) {
 	var buf bytes.Buffer
 	Render(ui.NewPlain(&buf), newReport([]Check{
@@ -348,5 +341,119 @@ func TestRenderJSONRoundTrips(t *testing.T) {
 	}
 	if got.Summary.Pass != 1 || got.Checks[0].Name != "git" {
 		t.Errorf("round trip mismatch: %+v", got)
+	}
+}
+
+func TestCredentialsCheckWarnsWithoutAToken(t *testing.T) {
+	srv := okServer(t)
+	report := Run(context.Background(), Options{Config: config.Default(), Env: healthyEnv(t, srv.URL)})
+	c := byName(t, report, "GitHub credentials")
+
+	if c.Status != StatusWarn {
+		t.Fatalf("GitHub credentials = %q, want warn when no token is configured", c.Status)
+	}
+	if c.Remedy == "" {
+		t.Error("the check must tell the operator how to get a token")
+	}
+	if !report.OK() {
+		t.Error("a missing token must not fail the report; doctor works without one")
+	}
+}
+
+func TestCredentialsCheckPasses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			w.Header().Set("X-OAuth-Scopes", "repo, workflow")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"login":"octocat"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	report := Run(context.Background(), Options{
+		Config:      config.Default(),
+		Token:       "ghp_test",
+		TokenOrigin: "RUNNERLY_GITHUB_TOKEN",
+		Env:         healthyEnv(t, srv.URL),
+	})
+	c := byName(t, report, "GitHub credentials")
+
+	if c.Status != StatusPass {
+		t.Fatalf("GitHub credentials = %q (%s), want pass", c.Status, c.Detail)
+	}
+	if !strings.Contains(c.Detail, "octocat") || !strings.Contains(c.Detail, "RUNNERLY_GITHUB_TOKEN") {
+		t.Errorf("detail should name the account and the token source: %q", c.Detail)
+	}
+}
+
+func TestCredentialsCheckWarnsOnMissingScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			w.Header().Set("X-OAuth-Scopes", "read:user")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"login":"octocat"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	report := Run(context.Background(), Options{
+		Config: config.Default(),
+		Token:  "ghp_test",
+		Env:    healthyEnv(t, srv.URL),
+	})
+	c := byName(t, report, "GitHub credentials")
+
+	if c.Status != StatusWarn {
+		t.Fatalf("GitHub credentials = %q, want warn for a token missing the repo scope", c.Status)
+	}
+	if !strings.Contains(c.Detail, "repo") {
+		t.Errorf("detail should name the missing scope: %q", c.Detail)
+	}
+}
+
+func TestCredentialsCheckFailsOnBadToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"Bad credentials"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	report := Run(context.Background(), Options{
+		Config: config.Default(),
+		Token:  "ghp_revoked",
+		Env:    healthyEnv(t, srv.URL),
+	})
+	c := byName(t, report, "GitHub credentials")
+
+	if c.Status != StatusFail {
+		t.Fatalf("GitHub credentials = %q, want fail for a revoked token", c.Status)
+	}
+	if c.Remedy != "runnerly login" {
+		t.Errorf("Remedy = %q, want runnerly login", c.Remedy)
+	}
+	if report.OK() {
+		t.Error("report.OK() = true despite an invalid token")
+	}
+}
+
+func TestCredentialsCheckSkippedWhenOffline(t *testing.T) {
+	env := healthyEnv(t, "http://127.0.0.1:1")
+	report := Run(context.Background(), Options{
+		Config:  config.Default(),
+		Token:   "ghp_test",
+		Offline: true,
+		Env:     env,
+	})
+	if got := byName(t, report, "GitHub credentials"); got.Status != StatusSkip {
+		t.Errorf("GitHub credentials = %q, want skip when offline", got.Status)
 	}
 }

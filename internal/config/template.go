@@ -41,6 +41,9 @@ runner:
   # GitHub runner labels. These map directly to GitHub's own labels.
   labels:
 %s
+  # Where the official GitHub runner is installed. Empty uses
+  # /opt/runnerly/runners for root, or ~/.local/share/runnerly/runners.
+  dir: ""
 
 executor:
   # host   - the GitHub runner executes jobs directly on this machine

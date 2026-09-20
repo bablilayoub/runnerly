@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/bablilayoub/runnerly/internal/config"
+	"github.com/bablilayoub/runnerly/internal/github"
 )
 
 // Status is the outcome of a single check.
@@ -95,6 +96,12 @@ type Options struct {
 	ConfigPath string
 	// ConfigFound is false when no configuration file exists yet.
 	ConfigFound bool
+	// Token is the resolved GitHub token, empty when none was found. Doctor
+	// never reads credentials itself; the CLI resolves them and passes the
+	// result in, so a doctor run is reproducible from its Options alone.
+	Token string
+	// TokenOrigin names where Token came from, for the report.
+	TokenOrigin string
 	// Offline skips every check that needs the network.
 	Offline bool
 	// Timeout bounds each individual check. Zero means DefaultTimeout.
@@ -131,6 +138,7 @@ func Run(ctx context.Context, opts Options) Report {
 	checks = append(checks,
 		checkOutboundHTTPS(ctx, opts),
 		checkGitHubAPI(ctx, opts),
+		checkGitHubCredentials(ctx, opts),
 		checkServer(ctx, opts),
 	)
 
@@ -282,7 +290,7 @@ func checkGitHubAPI(ctx context.Context, opts Options) Check {
 	if opts.Offline {
 		return skipOffline(c)
 	}
-	endpoint := APIBaseURL(opts.Config.GitHub.Host)
+	endpoint := github.APIBaseURL(opts.Config.GitHub.Host)
 	status, err := get(ctx, opts, endpoint)
 	if err != nil {
 		c.Status = StatusFail
@@ -298,6 +306,58 @@ func checkGitHubAPI(ctx context.Context, opts Options) Check {
 	}
 	c.Status = StatusPass
 	c.Detail = fmt.Sprintf("%s responded with HTTP %d", endpoint, status)
+	return c
+}
+
+func checkGitHubCredentials(ctx context.Context, opts Options) Check {
+	c := Check{Name: "GitHub credentials"}
+
+	if opts.Token == "" {
+		c.Status = StatusWarn
+		c.Detail = "no GitHub token was found, so runners cannot be registered.\n" +
+			"Everything else on this machine can still be checked."
+		c.Remedy = "runnerly login"
+		return c
+	}
+	if opts.Offline {
+		return skipOffline(c)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+
+	client := github.NewForHost(opts.Config.GitHub.Host, opts.Token,
+		github.WithHTTPClient(opts.Env.HTTPClient))
+
+	identity, err := client.Identify(ctx)
+	if err != nil {
+		c.Status = StatusFail
+		c.Detail = err.Error()
+		if github.IsUnauthorized(err) {
+			c.Remedy = "runnerly login"
+		}
+		return c
+	}
+
+	detail := fmt.Sprintf("authenticated as %s", identity.User.Login)
+	if opts.TokenOrigin != "" {
+		detail += fmt.Sprintf(" (token from %s)", opts.TokenOrigin)
+	}
+
+	// The scope the token needs depends on where runners are registered.
+	kind := github.KindRepository
+	if opts.Config.GitHub.Scope == config.ScopeOrganization {
+		kind = github.KindOrganization
+	}
+	if missing := github.MissingScope(kind, identity.Scopes); missing != "" {
+		c.Status = StatusWarn
+		c.Detail = detail + fmt.Sprintf("\nThe token has no %q scope, which registering %s runners requires.", missing, kind)
+		c.Remedy = "Create a token with the " + missing + " scope, then run `runnerly login`"
+		return c
+	}
+
+	c.Status = StatusPass
+	c.Detail = detail
 	return c
 }
 
@@ -354,20 +414,9 @@ func get(ctx context.Context, opts Options, endpoint string) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// APIBaseURL returns the REST API root for a GitHub host. GitHub.com serves
-// its API from a separate hostname; GitHub Enterprise Server serves it from
-// /api/v3 on the same host.
-func APIBaseURL(host string) string {
-	host = strings.TrimSpace(host)
-	if host == "" || host == "github.com" || host == "www.github.com" {
-		return "https://api.github.com"
-	}
-	return "https://" + host + "/api/v3"
-}
-
-// apiHost returns the hostname that APIBaseURL resolves to, for dial checks.
+// apiHost returns the hostname github.APIBaseURL resolves to, for dial checks.
 func apiHost(host string) string {
-	u, err := url.Parse(APIBaseURL(host))
+	u, err := url.Parse(github.APIBaseURL(host))
 	if err != nil || u.Hostname() == "" {
 		return "api.github.com"
 	}

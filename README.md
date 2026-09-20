@@ -23,18 +23,21 @@ workflows and assigns jobs. Runnerly manages the machines around
 
 ## Status
 
-Early development. Today the CLI can tell you whether a machine is ready to
-host a runner, and manage its configuration file.
+Early development. The CLI can check a machine, authenticate with GitHub, and
+install and register a real self-hosted runner. It does not yet keep that
+runner running.
 
 | Area | State |
 | --- | --- |
-| `runnerly version` | works |
-| `runnerly doctor` | works |
-| `runnerly config` | works |
-| `runnerly setup`, GitHub registration | not implemented |
-| Runner agent, control plane, dashboard | not implemented |
+| `runnerly doctor`, `config`, `version` | works |
+| `runnerly login` / `logout` / `auth status` | works |
+| `runnerly repo list` | works |
+| `runnerly runner create` / `list` / `status` / `remove` | works |
+| Starting and supervising the runner process | not implemented |
+| Automatic recovery, upgrades, ephemeral lifecycle | not implemented |
+| Control plane, heartbeats, dashboard | not implemented |
 
-Nothing here registers a runner with GitHub yet. See
+`runner create` registers a runner; you start it yourself for now. See
 [docs/architecture.md](docs/architecture.md) for where this is going.
 
 ## Try it
@@ -47,6 +50,35 @@ cd runnerly
 make build
 ./dist/runnerly doctor
 ```
+
+Then point it at a repository:
+
+```bash
+echo "$GITHUB_TOKEN" | runnerly login --with-token
+runnerly repo list
+runnerly runner create --repo owner/repo
+```
+
+```text
+Registering runnerly-01
+
+  resolving the runner release GitHub expects
+  downloading actions-runner-linux-x64-2.x.x.tar.gz
+  unpacking the runner
+  registering with GitHub
+
+✓ runnerly-01 is registered with owner/repo
+
+  scope    owner/repo
+  labels   self-hosted,linux,x64,docker
+  dir      /home/me/.local/share/runnerly/runners/runnerly-01
+
+Start it:
+  cd /home/me/.local/share/runnerly/runners/runnerly-01 && ./run.sh
+```
+
+The archive is checked against the SHA-256 checksum GitHub publishes with it
+before anything is unpacked or executed.
 
 `doctor` inspects the machine and explains anything that would stop a runner
 from working:
@@ -74,6 +106,24 @@ Runnerly Doctor
 It exits non-zero when a check fails, so it works in a provisioning script.
 `--json` gives machine-readable output, and `--offline` skips network checks.
 
+## Runners
+
+```bash
+runnerly runner list
+runnerly runner status runnerly-01
+runnerly runner remove runnerly-01
+```
+
+Labels map straight to GitHub's, so a workflow reaches the runner the usual way:
+
+```yaml
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64, docker]
+```
+
+Details in [docs/runners.md](docs/runners.md) and [docs/github.md](docs/github.md).
+
 ## Configuration
 
 ```bash
@@ -91,10 +141,17 @@ Self-hosted runners execute code from your workflows. Read
 [docs/security.md](docs/security.md) before pointing one at a public repository
 or at pull requests from forks.
 
+Runnerly refuses to register a runner against a public repository unless you
+explicitly allow it, verifies every download against GitHub's published
+checksum, and rejects archive entries that would be written outside the install
+directory.
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
 - [Installation](docs/installation.md)
+- [GitHub integration](docs/github.md)
+- [Runners](docs/runners.md)
 - [Configuration](docs/configuration.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

@@ -4,23 +4,64 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/bablilayoub/runnerly/internal/doctor"
+	"github.com/bablilayoub/runnerly/internal/github"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
 
-// run executes the command tree against buffers and returns what it wrote.
-func run(t *testing.T, args ...string) (stdout, stderr string, err error) {
+// option customizes the environment a test command runs in.
+type option func(*env)
+
+// withStdin supplies standard input, for commands that read a token or a
+// confirmation.
+func withStdin(s string) option {
+	return func(e *env) { e.in = strings.NewReader(s) }
+}
+
+// withInteractive makes the CLI believe it can prompt. Confirmation prompts
+// refuse to assume yes when there is no terminal, so tests that exercise the
+// prompt must say so explicitly.
+func withInteractive() option {
+	return func(e *env) { e.interactive = true }
+}
+
+// withGitHub points the whole command tree at a fake GitHub.
+func withGitHub(t *testing.T, handler http.HandlerFunc) option {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return func(e *env) {
+		e.newGitHubClient = func(_, token string) *github.Client {
+			return github.New(token, github.WithBaseURL(srv.URL), github.WithHTTPClient(srv.Client()))
+		}
+	}
+}
+
+// runCLI executes the command tree against buffers and returns what it wrote.
+func runCLI(t *testing.T, opts []option, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	root := NewRootCommand(&out, &errOut)
+	e := newEnv(strings.NewReader(""), &out, &errOut)
+	for _, opt := range opts {
+		opt(e)
+	}
+	root := newRootCommand(e)
 	root.SetArgs(args)
 	err = root.Execute()
 	return out.String(), errOut.String(), err
+}
+
+// run is runCLI without options, for commands that touch nothing external.
+func run(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	return runCLI(t, nil, args...)
 }
 
 func TestVersionShort(t *testing.T) {

@@ -92,3 +92,48 @@ func TestColorEnabledRespectsEnvironment(t *testing.T) {
 		})
 	}
 }
+
+func TestTableAlignsColumns(t *testing.T) {
+	var buf bytes.Buffer
+	tbl := NewTable("NAME", "STATUS", "LABELS")
+	tbl.Row("runnerly-01", "online", "linux,x64")
+	tbl.Row("a", "busy", "linux")
+
+	NewPlain(&buf).Table(tbl)
+
+	want := strings.Join([]string{
+		"NAME         STATUS  LABELS",
+		"runnerly-01  online  linux,x64",
+		"a            busy    linux",
+	}, "\n") + "\n"
+
+	if buf.String() != want {
+		t.Errorf("table misaligned:\ngot:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestTableLeavesNoTrailingWhitespace(t *testing.T) {
+	var buf bytes.Buffer
+	tbl := NewTable("NAME", "STATUS")
+	tbl.Row("runnerly-01", "online")
+	tbl.Row("a", "busy")
+
+	NewPlain(&buf).Table(tbl)
+	for _, l := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if l != strings.TrimRight(l, " ") {
+			t.Errorf("line has trailing whitespace: %q", l)
+		}
+	}
+}
+
+func TestEmptyTableWritesNothing(t *testing.T) {
+	var buf bytes.Buffer
+	NewPlain(&buf).Table(NewTable("NAME"))
+	if buf.Len() != 0 {
+		t.Errorf("empty table wrote %q", buf.String())
+	}
+	NewPlain(&buf).Table(nil)
+	if buf.Len() != 0 {
+		t.Errorf("nil table wrote %q", buf.String())
+	}
+}

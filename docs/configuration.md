@@ -57,11 +57,15 @@ runner:
   # Empty means "generate one".
   name: ""
   # GitHub runner labels. These map directly to GitHub's labels; Runnerly
-  # does not add a routing system of its own.
+  # does not add a routing system of its own. The platform labels
+  # (self-hosted, the OS, the architecture) are always added on top.
   labels:
     - linux
     - x64
     - runnerly
+  # Where the official GitHub runner is installed. Empty uses
+  # /opt/runnerly/runners for root, or ~/.local/share/runnerly/runners.
+  dir: ""
 
 executor:
   # "host"   - the GitHub runner executes jobs directly on the machine
@@ -101,10 +105,20 @@ The configuration changes what `doctor` checks:
 | `server.url: ""` | the control-plane check is skipped |
 | `server.url` set | `GET <url>/api/v1/health` must return 200 |
 | `github.host` | chooses the API endpoint that must be reachable |
+| `github.scope` | chooses which token scope the credentials check expects |
+
+## Credentials
+
+The GitHub token is **not** in this file. It lives in `credentials.yaml` beside
+it, written with mode 0600, and is managed with `runnerly login` and
+`runnerly logout`. See [github.md](github.md) and [security.md](security.md).
 
 ## Not yet used
 
-`server.url`, `updates.auto`, `security.*`, and the `github.*` scope fields are
-read and validated but not yet acted on — the components that consume them do
-not exist. They are in the file now so the shape of the configuration does not
-change under you later.
+`server.url` and `updates.auto` are read and validated but not yet acted on —
+the components that consume them do not exist. They are in the file now so the
+shape of the configuration does not change under you later.
+
+`security.allow_fork_workflows` is likewise recorded but not enforced;
+`security.allow_public_repositories` **is** enforced, by
+`runnerly runner create`.
