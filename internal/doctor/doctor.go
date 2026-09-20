@@ -188,8 +188,21 @@ func checkOS(goos string) Check {
 		return c
 	}
 	c.Status = StatusWarn
-	c.Detail = fmt.Sprintf("%s detected. Runnerly manages runners on Linux only.\n"+
-		"The CLI works here for development; do not register a runner from this machine.", goos)
+	switch goos {
+	case "darwin":
+		// A runner does register and run jobs here; what is missing is the
+		// service integration, since the unit Runnerly generates is
+		// systemd. Saying "do not register a runner" was simply wrong.
+		c.Detail = "macOS detected. Runners work here, but Runnerly has no service\n" +
+			"integration for it: `agent systemd` generates a systemd unit, which macOS\n" +
+			"does not use. Run the agent yourself, or keep it under launchd."
+	case "windows":
+		c.Detail = "Windows detected. Runnerly does not support Windows runners: the job\n" +
+			"hooks it installs are shell scripts, so cleanup and busy reporting do not work."
+	default:
+		c.Detail = fmt.Sprintf("%s detected. Runnerly is developed and tested on Linux;\n"+
+			"anything else is untried.", goos)
+	}
 	return c
 }
 

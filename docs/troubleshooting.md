@@ -108,11 +108,16 @@ NO_COLOR=1 runnerly doctor
 
 ```text
 ! operating system
-  darwin detected. Runnerly manages runners on Linux only.
+  macOS detected. Runners work here, but Runnerly has no service
+  integration for it.
 ```
 
-Expected on macOS. The CLI works for development; register runners from Linux.
-This is a warning, not a failure, so the exit code is still `0`.
+Expected, and a warning rather than a failure, so the exit code is still `0`.
+
+A runner does register and run jobs on macOS. What is missing is the service
+integration: `runnerly agent systemd` generates a systemd unit, which macOS
+does not use, so run the agent yourself or keep it under launchd. Windows is
+not supported at all — the job hooks are shell scripts.
 
 ## GitHub says 404 for a repository that exists
 
