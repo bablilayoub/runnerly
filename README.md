@@ -128,8 +128,10 @@ for machine-readable output, `--offline` to skip network checks.
 
 **Keeps the runner running.** The agent restarts a failed runner on a 5s,
 10s, 20s, 40s, 80s backoff, then stops rather than hiding one that cannot
-start. systemd restarts the agent — two layers, each covering the other's
-failure.
+start. A second limit — ten restarts an hour — catches the failures that
+take so long to happen that each one looks like a healthy run, which is how
+a supervisor ends up restarting something forever. systemd restarts the
+agent: two layers, each covering the other's failure.
 
 ```bash
 runnerly agent run        # foreground

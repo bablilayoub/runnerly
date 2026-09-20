@@ -85,17 +85,41 @@ type Backoff struct {
 	// forgiven. Without it, a runner that works fine for weeks would still be
 	// one failure away from the end of its backoff.
 	ResetAfter time.Duration
+	// MaxRestartsPerWindow bounds restarts over a longer span, whatever
+	// ResetAfter has forgiven in between. Zero means no ceiling.
+	//
+	// It exists because uptime is not health, and ResetAfter assumes it is.
+	// A process that takes longer than ResetAfter to fail clears its own
+	// history on every attempt, so MaxRestarts is never reached and the
+	// supervisor restarts it forever — the exact outcome MaxRestarts is
+	// there to prevent.
+	//
+	// This is not hypothetical. Kill GitHub's runner with SIGKILL and it
+	// never tells GitHub it has gone, so the next one is refused with "a
+	// session for this runner already exists". It retries that for four
+	// minutes and exits 0. Four minutes is longer than ResetAfter, so every
+	// failure looked like a healthy run that happened to end.
+	MaxRestartsPerWindow int
+	// Window is the span MaxRestartsPerWindow counts over.
+	Window time.Duration
 }
 
 // DefaultBackoff is 5s, 10s, 20s, 40s, 80s, then stop. A process that stays up
-// for a minute is treated as healthy again.
+// for a minute is treated as healthy again, and no more than ten restarts are
+// allowed in an hour however many times that happens.
+//
+// Ten an hour is far above what a working machine does — a runner that is
+// fine restarts when GitHub ships an update, which is days apart — and far
+// below a loop, which manages one every few minutes.
 func DefaultBackoff() Backoff {
 	return Backoff{
-		Initial:     5 * time.Second,
-		Max:         80 * time.Second,
-		Factor:      2,
-		MaxRestarts: 5,
-		ResetAfter:  time.Minute,
+		Initial:              5 * time.Second,
+		Max:                  80 * time.Second,
+		Factor:               2,
+		MaxRestarts:          5,
+		ResetAfter:           time.Minute,
+		MaxRestartsPerWindow: 10,
+		Window:               time.Hour,
 	}
 }
 
@@ -146,6 +170,9 @@ type Options struct {
 	Start StartFunc
 	// OnEvent receives every state change. It must not block for long.
 	OnEvent func(Event)
+	// Now reads the clock. Nil uses time.Now; tests replace it so the
+	// restart window can be exercised without waiting an hour.
+	Now func() time.Time
 }
 
 // Supervisor runs a process and restarts it when it fails.
@@ -158,6 +185,10 @@ type Supervisor struct {
 	// restarting marks an exit as one the operator asked for, so it does not
 	// count against the backoff policy.
 	restarting bool
+
+	// recent holds when each unasked-for restart happened, oldest first, so
+	// the window can be counted without keeping every restart ever.
+	recent []time.Time
 }
 
 // New returns a Supervisor. It validates the options so a misconfiguration
@@ -174,6 +205,9 @@ func New(opts Options) (*Supervisor, error) {
 	}
 	if opts.Backoff.Factor == 0 && opts.Backoff.Initial == 0 {
 		opts.Backoff = DefaultBackoff()
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
 	}
 	return &Supervisor{opts: opts}, nil
 }
@@ -242,12 +276,20 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			return nil
 		}
 
-		// A process that stayed up long enough has earned a clean slate.
+		// A process that stayed up long enough has earned a clean slate —
+		// but only against the consecutive-failure count. The restart
+		// budget below is what a long-running failure cannot clear.
 		if s.opts.Backoff.ResetAfter > 0 && uptime >= s.opts.Backoff.ResetAfter {
 			if attempt > 0 {
 				s.emit(Event{Kind: EventHealthy, Uptime: uptime})
 			}
 			attempt = 0
+		}
+
+		if spent, limit := s.spendRestart(); limit > 0 && spent > limit {
+			s.emit(Event{Kind: EventGaveUp, Attempt: spent})
+			return fmt.Errorf("%w: %d restarts in %s, which is more than %d",
+				ErrGaveUp, spent, s.opts.Backoff.Window, limit)
 		}
 
 		attempt++
@@ -256,6 +298,31 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			return waitErr
 		}
 	}
+}
+
+// spendRestart records a restart and reports how many have happened inside
+// the window, with the ceiling. Unlike the consecutive-failure count, this
+// is not cleared by a process that stayed up: a failure that takes longer
+// than ResetAfter to happen still spends from the budget.
+func (s *Supervisor) spendRestart() (spent, limit int) {
+	limit = s.opts.Backoff.MaxRestartsPerWindow
+	window := s.opts.Backoff.Window
+	if limit <= 0 || window <= 0 {
+		return 0, 0
+	}
+
+	now := s.opts.Now()
+	cutoff := now.Add(-window)
+
+	kept := s.recent[:0]
+	for _, at := range s.recent {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	s.recent = append(kept, now)
+
+	return len(s.recent), limit
 }
 
 // waitBeforeRetry applies the backoff. It reports whether Run should return,

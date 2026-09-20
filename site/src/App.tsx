@@ -278,7 +278,7 @@ const CAPABILITIES = [
   {
     icon: Activity,
     title: "Keeps the runner running",
-    body: "The agent restarts a failed runner on a 5s, 10s, 20s, 40s, 80s backoff, then stops rather than hiding one that cannot start. systemd restarts the agent — two layers, each covering the other's failure.",
+    body: "The agent restarts a failed runner on a 5s, 10s, 20s, 40s, 80s backoff, then stops rather than hiding one that cannot start — and a ceiling of ten restarts an hour catches the failures slow enough that each one looks healthy. systemd restarts the agent: two layers, each covering the other's failure.",
   },
   {
     icon: Container,

@@ -56,6 +56,36 @@ A runner that stays up for a minute has its failure history cleared, so a
 machine that works for weeks is never one crash away from the end of its
 backoff.
 
+### Why there is also a ceiling
+
+Clearing the history on uptime alone is not enough, because **uptime is not
+health**. A runner can stay up for four minutes failing and then exit, and
+four minutes is longer than the minute that earns a clean slate — so every
+failure looked like a healthy run that happened to end, the count reset, and
+the five-restart limit was never reached.
+
+That is a real failure, not a hypothetical one. Kill a runner with `SIGKILL`
+and it never tells GitHub it has gone, so the replacement is refused:
+
+```text
+A session for this runner already exists.
+Stop retry on SessionConflictException after retried for 240 seconds.
+Runner listener exit with Session Conflict error, stop the service.
+```
+
+It exits `0`, after 240 seconds. Left alone, the agent restarted it forever.
+
+So a second limit applies that uptime cannot clear: **no more than ten
+restarts in an hour**, however healthy the runs in between looked. Ten an
+hour is far above a working machine — a fine runner restarts when GitHub
+ships an update, days apart — and far below a loop, which manages one every
+few minutes. Past it the agent gives up and says why, and systemd's own
+restart limits take over from there.
+
+The session conflict itself clears on GitHub's side after a few minutes, so
+the next agent start succeeds. The point of the ceiling is that the failure
+becomes visible instead of silent.
+
 ## Logs
 
 The agent writes structured logs on stdout and forwards the runner's own

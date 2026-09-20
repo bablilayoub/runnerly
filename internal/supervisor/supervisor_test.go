@@ -589,3 +589,107 @@ func TestARestartRequestedWhileStoppedDoesNotLeak(t *testing.T) {
 		t.Errorf("Run() = %v, want ErrGaveUp: a stale restart flag hid a crash loop", err)
 	}
 }
+
+// TestLongRunningFailureCannotRestartForever is the regression test for a
+// loop found by killing a real runner.
+//
+// SIGKILL leaves GitHub holding the old session, so the replacement is
+// refused with "a session for this runner already exists". It retries that
+// for four minutes and exits 0. Four minutes is longer than ResetAfter, so
+// every failure cleared the consecutive-failure count and MaxRestarts was
+// never reached: the supervisor restarted it forever, which is the one
+// thing MaxRestarts exists to prevent.
+//
+// The fake process here behaves the same way: it always fails, and it
+// always takes longer than ResetAfter to do it.
+func TestLongRunningFailureCannotRestartForever(t *testing.T) {
+	var starts atomic.Int32
+
+	// A clock the test drives, so an hour-long window costs no wall time.
+	now := time.Now()
+	clock := func() time.Time { return now }
+
+	s, err := New(Options{
+		Process: ProcessOptions{Command: "irrelevant"},
+		Now:     clock,
+		Backoff: Backoff{
+			Initial:              time.Millisecond,
+			Max:                  time.Millisecond,
+			Factor:               1,
+			MaxRestarts:          5,
+			ResetAfter:           time.Nanosecond, // every run looks "long"
+			MaxRestartsPerWindow: 10,
+			Window:               time.Hour,
+		},
+		Start: func(ProcessOptions) (Process, error) {
+			starts.Add(1)
+			// Each failure lands a minute later than the last, so the
+			// window fills the way it did on the real machine.
+			now = now.Add(time.Minute)
+			return newFakeProcess(1).exitsWith(errors.New("session conflict")), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = s.Run(ctx)
+	if !errors.Is(err, ErrGaveUp) {
+		t.Fatalf("Run() error = %v, want ErrGaveUp — it restarted forever", err)
+	}
+	// One launch plus at most the budget of restarts.
+	if got := starts.Load(); got > 11 {
+		t.Errorf("started %d times, want no more than 11", got)
+	}
+	if got := starts.Load(); got < 2 {
+		t.Errorf("started %d times, want it to have retried at all", got)
+	}
+}
+
+// A machine that works for months restarts occasionally and must not be
+// given up on for it, which is the reason the window is not simply a cap on
+// restarts ever.
+func TestSpacedRestartsDoNotExhaustTheBudget(t *testing.T) {
+	var starts atomic.Int32
+
+	now := time.Now()
+	s, err := New(Options{
+		Process: ProcessOptions{Command: "irrelevant"},
+		Now:     func() time.Time { return now },
+		Backoff: Backoff{
+			Initial:              time.Millisecond,
+			Max:                  time.Millisecond,
+			Factor:               1,
+			MaxRestarts:          5,
+			ResetAfter:           time.Nanosecond,
+			MaxRestartsPerWindow: 10,
+			Window:               time.Hour,
+		},
+		Start: func(ProcessOptions) (Process, error) {
+			n := starts.Add(1)
+			// A day between failures: well outside the window every time.
+			now = now.Add(24 * time.Hour)
+			if n >= 20 {
+				// Stops failing: this one just runs until the test ends.
+				return newFakeProcess(int(n)).honorsStop(), nil
+			}
+			return newFakeProcess(int(n)).exitsWith(errors.New("occasional")), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	if err := s.Run(ctx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() gave up on a machine that fails once a day: %v", err)
+	}
+	if got := starts.Load(); got < 20 {
+		t.Errorf("started %d times, want it to have kept going past the budget", got)
+	}
+}
