@@ -1,0 +1,4 @@
+# install.sh is meant to be piped into a shell, so it has to arrive as text
+# rather than as a download.
+/install.sh
+  Content-Type: text/plain; charset=utf-8

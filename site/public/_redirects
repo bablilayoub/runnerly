@@ -1,0 +1,8 @@
+# The docs are client-side routes, so /docs/agent is not a file on disk. A
+# static host has to fall back to index.html or every deep link 404s: the
+# landing page would work and every link off it would not.
+#
+# Netlify and Cloudflare Pages both read this file, and both serve a real
+# file in preference to a rewrite, so /install.sh is still install.sh.
+# On another host, configure the same fallback there.
+/*    /index.html   200

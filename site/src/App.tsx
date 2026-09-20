@@ -1,13 +1,13 @@
 import {
   Activity,
   ArrowRight,
-  ArrowUpRight,
   Boxes,
   Container,
   GaugeCircle,
   ShieldCheck,
   Terminal as TerminalIcon,
 } from "lucide-react"
+import { Link } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -74,7 +74,7 @@ function Nav() {
         </a>
         <nav className="flex items-center gap-1">
           <Button variant="ghost" size="sm" asChild className="rounded-full">
-            <a href="#docs">Docs</a>
+            <Link to="/docs">Docs</Link>
           </Button>
           <Button size="sm" asChild className="rounded-full">
             <a href={REPO} target="_blank" rel="noreferrer">
@@ -160,7 +160,7 @@ function Hero() {
                 </a>
               </Button>
               <Button size="lg" variant="secondary" asChild className="rounded-full">
-                <a href="#docs">Read the docs</a>
+                <Link to="/docs">Read the docs</Link>
               </Button>
             </div>
           </Step>
@@ -427,16 +427,16 @@ function NotBuilt() {
 }
 
 const DOCS = [
-  ["Getting started", "docs/getting-started.md", "bare machine to running jobs"],
-  ["Installation", "docs/installation.md", "platforms, building, uninstalling"],
-  ["Runners", "docs/runners.md", "creating, listing, removing"],
-  ["The agent", "docs/agent.md", "supervision, restarts, systemd"],
-  ["Docker executor", "docs/docker.md", "job cleanup and its boundaries"],
-  ["Ephemeral runners", "docs/ephemeral-runners.md", "the one-job lifecycle"],
-  ["Control plane", "docs/server.md", "the server and its API"],
-  ["Production", "docs/operations.md", "TLS, metrics, backups, upgrades"],
-  ["Security model", "docs/security.md", "read this before you deploy"],
-  ["Architecture", "docs/architecture.md", "how it fits together, and why"],
+  ["Getting started", "getting-started", "bare machine to running jobs"],
+  ["Installation", "installation", "platforms, building, uninstalling"],
+  ["Runners", "runners", "creating, listing, removing"],
+  ["The agent", "agent", "supervision, restarts, systemd"],
+  ["Docker executor", "docker", "job cleanup and its boundaries"],
+  ["Ephemeral runners", "ephemeral-runners", "the one-job lifecycle"],
+  ["Control plane", "server", "the server and its API"],
+  ["Production", "operations", "TLS, metrics, backups, upgrades"],
+  ["Security model", "security", "read this before you deploy"],
+  ["Architecture", "architecture", "how it fits together, and why"],
 ] as const
 
 function Docs() {
@@ -445,23 +445,24 @@ function Docs() {
       <Reveal className="mx-auto max-w-2xl text-center">
         <Eyebrow>Documentation</Eyebrow>
         <Heading>Written to be read before something breaks.</Heading>
+        <Lede className="mx-auto">
+          Fifteen pages, including an honest account of what Runnerly does not do.
+        </Lede>
       </Reveal>
 
       <div className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2">
-        {DOCS.map(([title, path, blurb], i) => (
-          <Reveal key={path} delay={(i % 2) * 0.05} className="bg-background">
-            <a
-              href={`${REPO}/blob/main/${path}`}
-              target="_blank"
-              rel="noreferrer"
+        {DOCS.map(([title, slug, blurb], i) => (
+          <Reveal key={slug} delay={(i % 2) * 0.05} className="bg-background">
+            <Link
+              to={`/docs/${slug}`}
               className="group flex h-full items-center justify-between gap-4 bg-background p-5 transition-colors hover:bg-card/70"
             >
               <span>
                 <span className="block font-medium tracking-tight">{title}</span>
                 <span className="mt-0.5 block text-sm text-muted-foreground">{blurb}</span>
               </span>
-              <ArrowUpRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-            </a>
+              <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+            </Link>
           </Reveal>
         ))}
       </div>
@@ -499,9 +500,7 @@ function Footer() {
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="sm" asChild className="rounded-full">
-            <a href={`${REPO}/blob/main/docs/security.md`} target="_blank" rel="noreferrer">
-              Security
-            </a>
+            <Link to="/docs/security">Security</Link>
           </Button>
           <Button variant="ghost" size="sm" asChild className="rounded-full">
             <a href={REPO} target="_blank" rel="noreferrer">

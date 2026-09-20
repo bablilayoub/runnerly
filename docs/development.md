@@ -36,6 +36,13 @@ people to `curl https://runnerly.dev/install.sh`. There is one installer in
 the repository and the site publishes that one, so the page cannot advertise
 a stale copy.
 
+The site also serves these documentation pages, read out of `docs/` at build
+time rather than copied. Editing a file here changes the page. Cross-
+references between pages become routes on the site, so `npm run check-docs`
+(which runs before every build, and in CI) fails on a link to a page that
+does not exist — a broken cross-reference is a 404 now, not a dead link on
+GitHub.
+
 ## install.sh
 
 `make lint-sh` runs shellcheck over it. CI goes further and runs the whole

@@ -170,6 +170,12 @@ jobs:
         working-directory: site
         run: npm run lint
 
+      # Cross-references between the docs are routes on the site now, so a
+      # link to a renamed page is a 404 rather than a dead GitHub link.
+      - name: Check the documentation links
+        working-directory: site
+        run: npm run check-docs
+
       - name: Build
         working-directory: site
         run: npm run build
@@ -180,6 +186,14 @@ jobs:
         run: |
           test -f site/dist/install.sh
           head -1 site/dist/install.sh | grep -q '^#!/bin/sh'
+
+      # Deep links like /docs/agent are client-side routes, so the host has
+      # to fall back to index.html. Without this file every link off the
+      # landing page 404s in production while working perfectly in dev.
+      - name: Check the SPA fallback is published
+        run: |
+          test -f site/dist/_redirects
+          grep -q '/index.html' site/dist/_redirects
 
   installer:
     name: installer

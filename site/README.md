@@ -57,6 +57,29 @@ keep working.
 
 If you add a color, it has no hue. That is the whole rule.
 
+## The docs
+
+`/docs/:slug` renders `docs/*.md` from the repository. They are read at build
+time with `import.meta.glob`, not copied, so there is one copy of every page
+and the site cannot drift from the documentation that ships with the source.
+Editing `docs/agent.md` changes the page.
+
+- The sidebar grouping is in `src/docs/registry.ts`. A page no group claims
+  still appears, under "More", so adding a file to `docs/` cannot make it
+  invisible.
+- Cross-references between pages (`[the agent](agent.md)`) are rewritten to
+  routes, so following one does not send the reader to GitHub. Links out of
+  `docs/` still go to the repository.
+- Headings get the same anchors GitHub generates, so `#the-core-risk` works
+  in both places.
+- Code blocks are deliberately not syntax highlighted. The palette has no
+  hue, and most blocks are terminal output where color would imply meaning
+  the output does not carry.
+
+`npm run check-docs` fails on a link to a page that does not exist, and on a
+page the sidebar does not list. It runs before every build and in CI, because
+a broken cross-reference is now a 404 rather than a dead link on GitHub.
+
 ## install.sh
 
 `npm run build` copies the repository's `install.sh` into `dist/`, because
@@ -71,6 +94,19 @@ page cannot end up advertising a stale copy. CI fails if it is missing.
 
 ## Deploying
 
-`site/dist` is static files. Nothing here assumes a host. Whatever serves it
-needs to serve `install.sh` as plain text — not as a download — so
-`curl | sh` works.
+`site/dist` is static files, and nothing here assumes a particular host. Two
+things the host has to get right:
+
+**The SPA fallback.** `/docs/agent` is a client-side route, not a file. Without
+a rewrite to `index.html` the landing page works and every link off it 404s.
+`public/_redirects` does this on Netlify and Cloudflare Pages; on anything
+else, configure the same fallback. Both serve a real file in preference to a
+rewrite, so `/install.sh` is still the installer.
+
+**install.sh as text.** It is piped into a shell, so it has to arrive as
+`text/plain` rather than as a download. `public/_headers` sets that on hosts
+that read it.
+
+`npx vite preview` has its own fallback built in, so it will happily serve
+deep links whether or not `_redirects` is correct. It proves the build, not
+the hosting.

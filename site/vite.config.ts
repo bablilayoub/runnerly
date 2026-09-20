@@ -8,4 +8,10 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
+  server: {
+    // The docs pages are the repository's own docs/*.md, read at build time
+    // rather than copied. One copy, so the site cannot drift from what ships
+    // with the source.
+    fs: { allow: [path.resolve(__dirname, "..")] },
+  },
 })

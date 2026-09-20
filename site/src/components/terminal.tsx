@@ -88,16 +88,22 @@ export function CopyLine({ command, className }: { command: string; className?: 
   }
 
   return (
+    // The pill hugs its command rather than filling the column, so a
+    // centered parent centers the command itself. Stretching it to the full
+    // width pushed the copy button to a far edge and left the text adrift.
     <div
       className={cn(
-        "group flex items-start gap-3 rounded-lg border border-border bg-card/60 py-3 pl-4 pr-3 backdrop-blur",
+        "group mx-auto flex w-fit max-w-full items-center gap-3 rounded-lg border border-border bg-card/60 py-2.5 pl-4 pr-2.5 backdrop-blur",
         className,
       )}
     >
-      <span aria-hidden className="select-none pt-px font-mono text-[13px] leading-relaxed text-muted-foreground sm:text-sm">
+      <span
+        aria-hidden
+        className="select-none font-mono text-[13px] leading-relaxed text-muted-foreground sm:text-sm"
+      >
         $
       </span>
-      <code className="flex-1 break-all text-left font-mono text-[13px] leading-relaxed text-foreground sm:text-sm">
+      <code className="min-w-0 break-all text-left font-mono text-[13px] leading-relaxed text-foreground sm:text-sm">
         {command}
       </code>
       <button
