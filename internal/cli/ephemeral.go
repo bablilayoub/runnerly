@@ -363,7 +363,7 @@ func (e *env) superviseEphemeral(ctx context.Context, cfg config.Config, configP
 		Logger: logger,
 		Output: output,
 	}
-	opts.Hooks, opts.ExtraEnv = agent.Configure(cfg, configPath)
+	opts.Hooks, opts.ExtraEnv = agent.ConfigureEphemeral(cfg, configPath)
 
 	if serverURL := agent.ServerURLFrom(cfg.Server.URL); serverURL != "" {
 		enrollment, err := agent.Enroll(ctx, agent.EnrollOptions{

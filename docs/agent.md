@@ -218,10 +218,15 @@ that is down does not take a working runner with it.
 The agent reports `starting`, `online`, `busy`, `stopping`, `offline` and
 `error`.
 
-`busy` comes from the job hooks the Docker executor installs, which the runner
-itself calls when a job starts and finishes. With `executor.type: host` no
-hooks are installed and the agent reports `online` rather than guessing at
-what the runner is doing. See [docker.md](docker.md).
+`busy` comes from the job hooks, which the runner itself calls when a job
+starts and finishes. The Docker executor installs them, because it needs
+them for cleanup too. With `executor.type: host` a long-lived runner gets no
+hooks and the agent reports `online` rather than guessing at what the runner
+is doing. See [docker.md](docker.md).
+
+`runnerly ephemeral run` is the exception: it installs them on either
+executor, since a one-job runner that cannot tell a finished job from a
+crash cannot do its job at all.
 
 ## Commands from the control plane
 

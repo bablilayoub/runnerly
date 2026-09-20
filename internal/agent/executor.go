@@ -15,24 +15,46 @@ import (
 // go through this, so they cannot drift into setting up the runner
 // differently.
 func Configure(cfg config.Config, configPath string) (HookOptions, []string) {
+	return configure(cfg, configPath, false)
+}
+
+// ConfigureEphemeral is Configure for a one-job runner, which needs the job
+// hooks whatever the executor is.
+//
+// The hooks do two jobs, and only one of them is about Docker. They clean up
+// after a job, which the host executor has no use for — and they are also
+// the only way to tell a finished job from a crash, which is the entire
+// lifecycle of a one-job runner. Installing them only for Docker meant
+// `ephemeral run` with executor.type: host ran a job successfully and then
+// reported "stopped without running a job".
+func ConfigureEphemeral(cfg config.Config, configPath string) (HookOptions, []string) {
+	return configure(cfg, configPath, true)
+}
+
+func configure(cfg config.Config, configPath string, needJobState bool) (HookOptions, []string) {
 	var hooks HookOptions
 	var extraEnv []string
 
-	if cfg.Executor.Type != config.ExecutorDocker {
-		// The host executor runs jobs directly. There is nothing to clean up
-		// and no container environment to point the runner at.
-		return hooks, nil
+	docker := cfg.Executor.Type == config.ExecutorDocker
+
+	if docker || needJobState {
+		hooks = HookOptions{
+			Install:    true,
+			Binary:     BinaryPath(),
+			ConfigPath: configPath,
+		}
 	}
 
-	hooks = HookOptions{
-		Install:    true,
-		Binary:     BinaryPath(),
-		ConfigPath: configPath,
-	}
-	if host := cfg.Executor.Docker.Host; host != "" {
-		// The runner starts job containers itself, so it needs to reach the
-		// same daemon Runnerly does.
-		extraEnv = append(extraEnv, "DOCKER_HOST="+host)
+	// The host executor runs jobs directly: nothing to clean up, and no
+	// container environment to point the runner at. The hook handler checks
+	// the same setting before it touches Docker, so a hook installed here
+	// for its job state alone does no Docker work.
+	if docker {
+		if host := cfg.Executor.Docker.Host; host != "" {
+			// The runner starts job containers itself, so it needs to reach
+			// the same daemon Runnerly does.
+			extraEnv = append(extraEnv, "DOCKER_HOST="+host)
+		}
 	}
 	return hooks, extraEnv
 }

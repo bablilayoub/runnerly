@@ -131,11 +131,17 @@ ephemeral:
   name_prefix: ""
 
 executor:
-  # Ephemeral works with either, but the Docker executor installs the job
-  # hooks that tell a finished job from a crash, and cleans up containers
-  # between runs.
+  # Ephemeral works with either. The Docker executor additionally cleans up
+  # containers between runs.
   type: docker
 ```
+
+An ephemeral runner installs the job hooks whatever the executor is. They
+are how anything can tell a finished job from a crash, which is the whole
+lifecycle of a one-job runner, so it does not get to depend on the executor.
+
+A long-lived runner on the host executor still gets no hooks: it has nothing
+to clean up, and the agent reports `online` rather than guessing at `busy`.
 
 ## What is not here
 
