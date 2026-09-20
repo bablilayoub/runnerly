@@ -49,7 +49,9 @@ export function Prompt({ children }: { children: ReactNode }) {
 
 /** Out is program output: dimmer than what the operator typed. */
 export function Out({ children, dim }: { children: ReactNode; dim?: boolean }) {
-  return <div className={dim ? "text-muted-foreground/60" : "text-muted-foreground"}>{children}</div>
+  return (
+    <div className={dim ? "text-muted-foreground/60" : "text-muted-foreground"}>{children}</div>
+  )
 }
 
 /** Ok is a passing check line. Monochrome, so the mark carries the meaning. */

@@ -13,7 +13,10 @@ export function Section({
   className?: string
 }) {
   return (
-    <section id={id} className={cn("scroll-mt-14 border-t border-border/60 py-20 sm:py-28", className)}>
+    <section
+      id={id}
+      className={cn("scroll-mt-14 border-t border-border/60 py-20 sm:py-28", className)}
+    >
       <div className="mx-auto w-full max-w-6xl px-6">{children}</div>
     </section>
   )
@@ -33,7 +36,7 @@ export function Heading({ children, className }: { children: ReactNode; classNam
   return (
     <h2
       className={cn(
-        "text-balance text-3xl font-medium tracking-tight sm:text-4xl",
+        "text-balance font-display text-3xl font-semibold tracking-[-0.02em] sm:text-4xl",
         className,
       )}
     >
@@ -45,7 +48,12 @@ export function Heading({ children, className }: { children: ReactNode; classNam
 /** Lede is the paragraph under a section title. */
 export function Lede({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <p className={cn("mt-4 max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg", className)}>
+    <p
+      className={cn(
+        "mt-4 max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg",
+        className,
+      )}
+    >
       {children}
     </p>
   )

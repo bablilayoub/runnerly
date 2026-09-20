@@ -47,7 +47,32 @@ Worth knowing when testing: an embedded or backgrounded browser throttles
 timers hard, so the replay will look stalled. Measure before concluding
 anything is slow — openhole.dev shows the same throttling in the same pane.
 
+## Components from elsewhere
+
+`src/components/ui/` is vendored — shadcn and ui-layouts copy source in
+rather than linking a package, which means these files are ours to fix.
+
+`spotlight.tsx` came from [ui-layouts](https://ui-layouts.com/components/spotlight-cards)
+and needed three changes before it could ship:
+
+- It attached a `window` mousemove listener **per card** and called
+  `setState` from each. Six cards meant six React renders on every mouse
+  move. The pointer is now tracked once per group, coalesced into an
+  animation frame, and written to CSS custom properties through a ref, so
+  moving the mouse re-renders nothing.
+- Its `SpotlightCard` variant was hardcoded to slate and indigo. This page
+  has no hue, so that variant is gone.
+- It opened with `@ts-nocheck`.
+
+The idea it contributed is the good part and is kept: one gradient in
+viewport space behind every card's border at once, so the grid lights up
+coherently around the pointer instead of each card reacting alone.
+
 ## Monochrome
+
+Three typefaces, each with a job: **Bricolage Grotesque** for display
+(headlines, section titles, the footer wordmark), **Geist** for reading, and
+**Geist Mono** for every line of terminal output, which is most of the page.
 
 Every color is `oklch(L 0 0)`: luminance with zero chroma. The shadcn Nova
 preset is almost entirely that already; `--destructive` was the one hue and

@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { GithubMark } from "@/components/github-mark"
 import { Lift, Reveal, Stagger, Step } from "@/components/motion"
 import { Session, type Line } from "@/components/session"
+import { Spotlight, SpotlightItem } from "@/components/ui/spotlight"
 import { Bad, CopyLine, Out, Prompt, Terminal } from "@/components/terminal"
 import { Eyebrow, Heading, Lede, Section } from "@/components/section"
 
@@ -44,21 +45,74 @@ export default function App() {
   )
 }
 
-/** Backdrop is the grid and the glow. Luminance only: the palette has no hue. */
+/**
+ * The backdrop behind the hero.
+ *
+ * Four layers, all of them luminance only, because the palette has no hue
+ * to reach for: a dot field, two slow-drifting glows, a horizon arc, and a
+ * film of grain over everything to stop the large flat areas banding.
+ *
+ * None of it animates per frame in JavaScript — the drift is two CSS
+ * keyframes on transform, which the compositor handles — and it all stops
+ * for anyone who has asked for reduced motion.
+ */
 function Backdrop() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      {/* A dot field rather than a line grid: at this opacity, lines read
+          as a surface and dots read as depth. Masked to fade out before
+          it reaches the content. */}
       <div
-        className="absolute inset-0 opacity-[0.04]"
+        className="absolute inset-0 opacity-[0.28]"
         style={{
           backgroundImage:
-            "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
-          backgroundSize: "64px 64px",
-          maskImage: "radial-gradient(ellipse 90% 55% at 50% 0%, black 30%, transparent 75%)",
+            "radial-gradient(circle at center, rgb(255 255 255 / 0.22) 1px, transparent 1px)",
+          backgroundSize: "26px 26px",
+          maskImage: "radial-gradient(ellipse 85% 58% at 50% 0%, black 15%, transparent 72%)",
+          WebkitMaskImage: "radial-gradient(ellipse 85% 58% at 50% 0%, black 15%, transparent 72%)",
         }}
       />
-      <div className="absolute left-1/2 top-[-22rem] size-[52rem] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[150px]" />
+
+      {/* Two glows, drifting at different speeds so they never settle into
+          an obvious loop. */}
+      <div className="absolute left-1/2 top-[-24rem] size-[54rem] -translate-x-1/2 rounded-full bg-white/[0.07] blur-[160px] motion-safe:animate-[drift-a_28s_ease-in-out_infinite]" />
+      <div className="absolute left-[18%] top-[-14rem] size-[34rem] rounded-full bg-white/[0.04] blur-[140px] motion-safe:animate-[drift-b_36s_ease-in-out_infinite]" />
+
+      {/* The horizon: one hairline arc, brightest where the glow sits. */}
+      <div
+        className="absolute inset-x-0 top-[38rem] h-px"
+        style={{
+          background:
+            "linear-gradient(to right, transparent, rgb(255 255 255 / 0.10) 35%, rgb(255 255 255 / 0.16) 50%, rgb(255 255 255 / 0.10) 65%, transparent)",
+        }}
+      />
+
+      <Grain />
     </div>
+  )
+}
+
+/**
+ * Grain, as an inline SVG turbulence filter.
+ *
+ * Large flat dark areas band badly on ordinary displays, and a little
+ * noise is what stops it. It is inline rather than an image so there is no
+ * request for it and nothing to keep in sync.
+ */
+function Grain() {
+  return (
+    <svg className="absolute inset-0 size-full opacity-[0.035] mix-blend-overlay" aria-hidden>
+      <filter id="grain">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.85"
+          numOctaves="3"
+          stitchTiles="stitch"
+        />
+        <feColorMatrix type="saturate" values="0" />
+      </filter>
+      <rect width="100%" height="100%" filter="url(#grain)" />
+    </svg>
   )
 }
 
@@ -70,7 +124,9 @@ function Nav() {
           <span className="grid size-6 place-items-center rounded border border-border">
             <TerminalIcon className="size-3.5" />
           </span>
-          <span className="font-medium tracking-tight">Runnerly</span>
+          <span className="font-display text-[1.05rem] font-semibold tracking-[-0.02em]">
+            Runnerly
+          </span>
         </a>
         <nav className="flex items-center gap-1">
           <Button variant="ghost" size="sm" asChild className="rounded-full">
@@ -104,11 +160,18 @@ const SETUP_SESSION: Line[] = [
   { kind: "out", text: "What this will do", dim: true },
   { kind: "gap" },
   { kind: "out", text: "  write     ~/.config/runnerly/config.yaml" },
-  { kind: "out", text: "  install   GitHub's runner into ~/.local/share/runnerly/runners/build-01" },
+  {
+    kind: "out",
+    text: "  install   GitHub's runner into ~/.local/share/runnerly/runners/build-01",
+  },
   { kind: "out", text: "  register  build-01 with acme/widgets" },
   { kind: "out", text: "  labels    self-hosted,linux,x64,runnerly" },
   { kind: "gap" },
-  { kind: "out", text: "  Nothing is started. The last step prints how to do that.", dim: true },
+  {
+    kind: "out",
+    text: "  Nothing is started. The last step prints how to do that.",
+    dim: true,
+  },
   { kind: "gap" },
   { kind: "cmd", text: "y" },
   { kind: "ok", text: "build-01 is registered with acme/widgets" },
@@ -137,7 +200,7 @@ function Hero() {
           </Step>
 
           <Step className="mt-7">
-            <h1 className="mx-auto max-w-4xl text-balance text-[2.6rem] font-medium leading-[1.03] tracking-[-0.02em] sm:text-6xl lg:text-7xl">
+            <h1 className="mx-auto max-w-4xl text-balance font-display text-[2.7rem] font-semibold leading-[1.02] tracking-[-0.035em] sm:text-6xl lg:text-[4.6rem]">
               Run GitHub Actions
               <br />
               <span className="text-muted-foreground/70">on your own machines.</span>
@@ -146,8 +209,8 @@ function Hero() {
 
           <Step className="mt-6">
             <p className="mx-auto max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-              Runnerly installs, registers, supervises and retires self-hosted runners. GitHub
-              keeps scheduling your workflows — Runnerly manages the machines that execute them.
+              Runnerly installs, registers, supervises and retires self-hosted runners. GitHub keeps
+              scheduling your workflows — Runnerly manages the machines that execute them.
             </p>
           </Step>
 
@@ -185,27 +248,45 @@ function Hero() {
 // Recount before changing any of these. The test figure is
 //   grep -rh "^func Test" --include '*_test.go' internal | wc -l
 const STATS = [
-  { figure: "3", label: "dependencies", note: "cobra, yaml.v3 and pgx. Nothing else." },
-  { figure: "434", label: "tests", note: "run against real Postgres and Docker in CI" },
-  { figure: "0", label: "lines of the runner reimplemented", note: "it wraps GitHub's own" },
-  { figure: "15", label: "pages of documentation", note: "including what is not built" },
+  {
+    figure: "3",
+    label: "dependencies",
+    note: "cobra, yaml.v3 and pgx. Nothing else.",
+  },
+  {
+    figure: "434",
+    label: "tests",
+    note: "run against real Postgres and Docker in CI",
+  },
+  {
+    figure: "0",
+    label: "lines of the runner reimplemented",
+    note: "it wraps GitHub's own",
+  },
+  {
+    figure: "15",
+    label: "pages of documentation",
+    note: "including what is not built",
+  },
 ] as const
 
 function Stats() {
   return (
     <Section className="border-t-0 py-0 sm:py-0">
       <Reveal>
-        <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+        <Spotlight className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {STATS.map(({ figure, label, note }) => (
-            <div key={label} className="bg-background p-6">
-              <div className="font-mono text-4xl font-medium tracking-tight tabular-nums">
-                {figure}
+            <SpotlightItem key={label} className="h-full">
+              <div className="h-full p-6">
+                <div className="font-display text-5xl font-semibold tracking-[-0.03em] tabular-nums">
+                  {figure}
+                </div>
+                <div className="mt-3 text-sm font-medium">{label}</div>
+                <div className="mt-1 text-sm leading-relaxed text-muted-foreground">{note}</div>
               </div>
-              <div className="mt-3 text-sm font-medium">{label}</div>
-              <div className="mt-1 text-sm text-muted-foreground">{note}</div>
-            </div>
+            </SpotlightItem>
           ))}
-        </div>
+        </Spotlight>
       </Reveal>
     </Section>
   )
@@ -235,7 +316,7 @@ function TheDance() {
               <Out dim># find the release, the checksum, the token…</Out>
               <Prompt>mkdir -p ~/actions-runner &amp;&amp; cd ~/actions-runner</Prompt>
               <Prompt>curl -O -L https://github.com/actions/runner/releases/…</Prompt>
-              <Prompt>echo "&lt;checksum&gt;  actions-runner.tar.gz" | shasum -a 256 -c</Prompt>
+              <Prompt>echo "&lt;checksum&gt; actions-runner.tar.gz" | shasum -a 256 -c</Prompt>
               <Prompt>tar xzf ./actions-runner.tar.gz</Prompt>
               <Prompt>./config.sh --url https://github.com/acme/widgets --token …</Prompt>
               <Prompt>sudo ./svc.sh install &amp;&amp; sudo ./svc.sh start</Prompt>
@@ -316,17 +397,21 @@ function Capabilities() {
         </Lede>
       </Reveal>
 
-      <div className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+      <Spotlight className="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {CAPABILITIES.map(({ icon: Icon, title, body }, i) => (
-          <Reveal key={title} delay={(i % 3) * 0.07} className="bg-background">
-            <Lift className="h-full bg-background p-6 transition-colors hover:bg-card/70">
-              <Icon className="size-5 text-muted-foreground" />
-              <h3 className="mt-4 font-medium tracking-tight">{title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
-            </Lift>
+          <Reveal key={title} delay={(i % 3) * 0.07} className="h-full">
+            <SpotlightItem className="h-full">
+              <Lift className="h-full p-6">
+                <Icon className="size-5 text-muted-foreground" />
+                <h3 className="mt-4 font-display text-[1.05rem] font-semibold tracking-[-0.01em]">
+                  {title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
+              </Lift>
+            </SpotlightItem>
           </Reveal>
         ))}
-      </div>
+      </Spotlight>
     </Section>
   )
 }
@@ -335,9 +420,19 @@ const FLEET_SESSION: Line[] = [
   { kind: "out", text: "Runners", dim: true },
   { kind: "out", text: "  3 total   1 online   1 busy   1 offline" },
   { kind: "gap" },
-  { kind: "out", text: "build-01      ● online   acme/widgets   linux/x64    28s ago" },
-  { kind: "out", text: "build-02      ● busy     acme/widgets   linux/x64    28s ago" },
-  { kind: "out", text: "build-arm-01  ○ offline  acme/gadgets   linux/arm64  never", dim: true },
+  {
+    kind: "out",
+    text: "build-01      ● online   acme/widgets   linux/x64    28s ago",
+  },
+  {
+    kind: "out",
+    text: "build-02      ● busy     acme/widgets   linux/x64    28s ago",
+  },
+  {
+    kind: "out",
+    text: "build-arm-01  ○ offline  acme/gadgets   linux/arm64  never",
+    dim: true,
+  },
 ]
 
 function Fleet() {
@@ -353,8 +448,7 @@ function Fleet() {
           <Heading>An optional control plane.</Heading>
           <Lede>
             Once several machines run runners, a small server answers what exists and whether it is
-            healthy, with a dashboard served from the same binary. A single machine never needs
-            one.
+            healthy, with a dashboard served from the same binary. A single machine never needs one.
           </Lede>
           <Lede className="mt-4">
             <Mono>busy</Mono> is what the runner itself reported through GitHub's job hooks — not a
@@ -452,26 +546,28 @@ function Docs() {
         </Lede>
       </Reveal>
 
-      <div className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2">
+      <Spotlight className="mt-14 grid gap-3 sm:grid-cols-2">
         {DOCS.map(([title, slug, blurb], i) => (
-          <Reveal key={slug} delay={(i % 2) * 0.05} className="bg-background">
-            <Link
-              to={`/docs/${slug}`}
-              className="group flex h-full items-center justify-between gap-4 bg-background p-5 transition-colors hover:bg-card/70"
-            >
-              <span>
-                <span className="block font-medium tracking-tight">{title}</span>
-                <span className="mt-0.5 block text-sm text-muted-foreground">{blurb}</span>
-              </span>
-              <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </Link>
+          <Reveal key={slug} delay={(i % 2) * 0.05} className="h-full">
+            <SpotlightItem className="h-full">
+              <Link
+                to={`/docs/${slug}`}
+                className="group flex h-full items-center justify-between gap-4 rounded-[calc(0.75rem-1px)] p-5 transition-colors hover:bg-card/70"
+              >
+                <span>
+                  <span className="block font-medium tracking-tight">{title}</span>
+                  <span className="mt-0.5 block text-sm text-muted-foreground">{blurb}</span>
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </SpotlightItem>
           </Reveal>
         ))}
-      </div>
+      </Spotlight>
 
       <Reveal delay={0.1} className="mt-14">
         <div className="rounded-2xl border border-border bg-card/40 p-8 text-center sm:p-12">
-          <h3 className="text-balance text-2xl font-medium tracking-tight sm:text-3xl">
+          <h3 className="text-balance font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">
             Two commands and the machine is running jobs.
           </h3>
           <div className="mx-auto mt-7 max-w-xl">
@@ -492,7 +588,10 @@ function Docs() {
  * add and the most annoying thing to click, so there is no Pricing, no
  * Changelog and no About here.
  */
-const FOOTER_LINKS: { heading: string; links: { label: string; to: string; external?: boolean }[] }[] = [
+const FOOTER_LINKS: {
+  heading: string
+  links: { label: string; to: string; external?: boolean }[]
+}[] = [
   {
     heading: "Product",
     links: [
@@ -516,7 +615,11 @@ const FOOTER_LINKS: { heading: string; links: { label: string; to: string; exter
     links: [
       { label: "Architecture", to: "/docs/architecture" },
       { label: "Security model", to: "/docs/security" },
-      { label: "Contributing", to: `${REPO}/blob/main/CONTRIBUTING.md`, external: true },
+      {
+        label: "Contributing",
+        to: `${REPO}/blob/main/CONTRIBUTING.md`,
+        external: true,
+      },
       { label: "License", to: `${REPO}/blob/main/LICENSE`, external: true },
     ],
   },
@@ -533,7 +636,9 @@ function Footer() {
                 <span className="grid size-6 place-items-center rounded border border-border">
                   <TerminalIcon className="size-3.5" />
                 </span>
-                <span className="font-medium tracking-tight">Runnerly</span>
+                <span className="font-display text-[1.05rem] font-semibold tracking-[-0.02em]">
+                  Runnerly
+                </span>
               </div>
 
               <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
@@ -602,7 +707,7 @@ function Footer() {
             <p>
               Built by{" "}
               <a
-                href="https://github.com/bablilayoub"
+                href="https://abablil.me"
                 target="_blank"
                 rel="noreferrer"
                 className="font-medium text-foreground transition-opacity hover:opacity-70"
@@ -632,11 +737,20 @@ function Footer() {
  */
 function Wordmark() {
   return (
-    <div aria-hidden className="pointer-events-none relative z-0 select-none overflow-hidden px-6 sm:px-10">
-      {/* The viewBox is shorter than the glyphs, which is what crops the
-          descender and the baseline against the footer's bottom edge. */}
+    <div
+      aria-hidden
+      className="pointer-events-none relative z-0 mt-12 select-none overflow-hidden px-6 sm:mt-16 sm:px-10"
+    >
+      {/* The viewBox is shorter than the glyphs, which crops the word
+          against the footer's bottom edge.
+
+          How much shorter matters. The baseline sits at y=235, so a height
+          of 210 cut 25 units *above* it — through the bottom of every
+          letter, not through the descenders. 270 clears the baseline and
+          takes about half the descender on the y, which is the crop this
+          is meant to be. */}
       <svg
-        viewBox="0 0 1200 210"
+        viewBox="0 -70 1200 340"
         className="block w-full"
         preserveAspectRatio="xMidYMin meet"
         role="presentation"
@@ -650,7 +764,7 @@ function Wordmark() {
           lengthAdjust="spacing"
           fontSize="300"
           fontWeight="500"
-          className="fill-foreground/[0.06] [font-family:inherit]"
+          className="fill-foreground/[0.06] [font-family:var(--font-display)]"
         >
           runnerly
         </text>

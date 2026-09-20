@@ -207,7 +207,13 @@ function OnThisPage({ markdown }: { markdown: string }) {
   )
 }
 
-function Neighbour({ doc, direction }: { doc: { slug: string; title: string }; direction: "prev" | "next" }) {
+function Neighbour({
+  doc,
+  direction,
+}: {
+  doc: { slug: string; title: string }
+  direction: "prev" | "next"
+}) {
   const isNext = direction === "next"
   return (
     <Link

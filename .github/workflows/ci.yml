@@ -170,6 +170,10 @@ jobs:
         working-directory: site
         run: npm run lint
 
+      - name: Check formatting
+        working-directory: site
+        run: npm run format:check
+
       # Cross-references between the docs are routes on the site now, so a
       # link to a renamed page is a 404 rather than a dead GitHub link.
       - name: Check the documentation links

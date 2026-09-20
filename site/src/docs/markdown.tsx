@@ -94,7 +94,11 @@ export function Markdown({ markdown }: { markdown: string }) {
         ),
 
         img: ({ src, alt }) => (
-          <img src={typeof src === "string" ? src : undefined} alt={alt} className="mb-6 rounded-xl border border-border" />
+          <img
+            src={typeof src === "string" ? src : undefined}
+            alt={alt}
+            className="mb-6 rounded-xl border border-border"
+          />
         ),
       }}
     >
@@ -104,13 +108,7 @@ export function Markdown({ markdown }: { markdown: string }) {
 }
 
 /** A heading you can link to, with the same anchor GitHub would give it. */
-function Anchored({
-  as: Tag,
-  children,
-}: {
-  as: "h2" | "h3" | "h4"
-  children?: ReactNode
-}) {
+function Anchored({ as: Tag, children }: { as: "h2" | "h3" | "h4"; children?: ReactNode }) {
   const id = slugify(textOf(children))
   const size = {
     h2: "mt-12 mb-4 text-2xl font-medium tracking-tight",
