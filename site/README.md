@@ -17,12 +17,35 @@ refuse. The dashboard keeps to three, because it ships inside a binary people
 run on their infrastructure. A marketing page has no such constraint, and
 there is no reason to hand-write an accordion.
 
-Two things are written here rather than installed:
+Three things are written here rather than installed:
 
-- `src/components/terminal.tsx` — the terminal frame. No component library
-  has one, and the page is mostly terminal output.
+- `src/components/session.tsx` — replays a terminal session, typing the
+  commands out. Runnerly is a command line tool, so the most honest thing the
+  page can show is the thing running; every line is copied from real output
+  and the replay only controls when each one appears.
+- `src/components/terminal.tsx` — the static terminal frame, for output that
+  should be readable at a glance rather than played.
 - `src/components/github-mark.tsx` — Lucide dropped brand icons, and pulling
   in a second icon package for one path would cost more than the path.
+
+## Motion
+
+`src/components/motion.tsx` wraps [motion](https://motion.dev). Two rules:
+
+**Reduced motion means no movement.** Content still appears; it just arrives
+instead of sliding. The session replay prints in full immediately.
+
+**An animation can only ever add to the page.** `Reveal` starts at zero
+opacity, so a reveal that never fires would leave a section invisible with
+its text sitting in the DOM — worse than no animation, and silent. It
+therefore shows its content after 2.5 seconds regardless of what the
+intersection observer did. This is not hypothetical: it was caught by
+checking computed opacity after scrolling to the bottom, with two blocks
+stuck at zero.
+
+Worth knowing when testing: an embedded or backgrounded browser throttles
+timers hard, so the replay will look stalled. Measure before concluding
+anything is slow — openhole.dev shows the same throttling in the same pane.
 
 ## Monochrome
 

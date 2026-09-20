@@ -97,7 +97,7 @@ export function CopyLine({ command, className }: { command: string; className?: 
       <span aria-hidden className="select-none pt-px font-mono text-[13px] leading-relaxed text-muted-foreground sm:text-sm">
         $
       </span>
-      <code className="flex-1 break-all font-mono text-[13px] leading-relaxed text-foreground sm:text-sm">
+      <code className="flex-1 break-all text-left font-mono text-[13px] leading-relaxed text-foreground sm:text-sm">
         {command}
       </code>
       <button
