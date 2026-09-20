@@ -1,0 +1,53 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - whitespace
+  settings:
+    errcheck:
+      # Writing to stdout/stderr is best effort: a CLI cannot do anything
+      # useful if its own output fails, and checking every Fprintf would
+      # drown the rendering code.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: errorf
+  exclusions:
+    generated: lax
+    rules:
+      # Tests deliberately construct odd inputs and ignore some errors.
+      - path: '_test\.go'
+        linters:
+          - gosec
+          - errcheck
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/bablilayoub/runnerly

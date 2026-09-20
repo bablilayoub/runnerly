@@ -1,0 +1,16 @@
+# Build output
+/dist/
+/coverage.out
+/coverage.html
+
+# Local configuration and runner state
+/.runnerly/
+*.local.yaml
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
