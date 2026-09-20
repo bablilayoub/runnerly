@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "postbuild": "node scripts/keep-dist.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

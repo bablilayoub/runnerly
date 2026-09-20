@@ -16,6 +16,9 @@ jobs:
   test:
     name: test (go ${{ matrix.go }})
     runs-on: ubuntu-latest
+    # The dashboard tests skip when no dashboard is embedded, so the suite
+    # runs against a real build rather than quietly covering nothing.
+    needs: web
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +55,12 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
+      - name: Fetch the built dashboard
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard
+          path: internal/web/dist
+
       - name: Check formatting
         run: make fmt-check
 
@@ -60,11 +69,28 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Check the dashboard build left the repository clean
+        # The build writes into internal/web/dist, which is ignored apart
+        # from the marker that keeps the directory in git. Anything else
+        # showing up means the ignore rules drifted.
+        run: git diff --exit-code
+
       - name: Vet
         run: make vet
 
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Check the dashboard tests actually ran
+        # A skipped suite looks like a passing one in the summary, which is
+        # how this coverage would quietly disappear.
+        run: |
+          go test -count=1 -run TestClientRoutesFallBackToTheShell -v ./internal/web/ \
+            | tee /tmp/web.log
+          if grep -q -- '--- SKIP' /tmp/web.log; then
+            echo "::error::the dashboard tests skipped; the built assets were not in place"
+            exit 1
+          fi
 
       - name: Check the database tests actually ran
         # A skipped integration suite looks identical to a passing one, so
