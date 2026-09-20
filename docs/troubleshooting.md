@@ -288,6 +288,60 @@ pgrep -fl runnerly-agent
 
 Under systemd, `systemctl stop` handles this correctly.
 
+## The agent will not enroll
+
+```text
+Error: this machine is not enrolled with the control plane at https://...
+```
+
+The agent has no machine token and was given no enrollment token. Issue one
+on the server and pass it once:
+
+```bash
+runnerly server enrollment-token create --max-uses 1     # on the server
+export RUNNERLY_ENROLLMENT_TOKEN=rnr_enroll_...          # on the machine
+```
+
+A `token_exhausted` error means the token was real but is spent, expired or
+revoked. They are single-use by default; issue another.
+
+## The control plane refuses the machine token
+
+```text
+the control plane refused the credential
+```
+
+Retrying will not help, and the agent says so and stops reporting rather than
+looping. The runner keeps running. It happens when the runner was deleted in
+the control plane, or its tokens were revoked. Delete the `servers` entry from
+`credentials.yaml` and enroll again.
+
+## The server will not start
+
+```text
+Error: no database URL.
+```
+
+Set `RUNNERLY_DATABASE_URL` or `server.database`. If it is set and PostgreSQL
+is not answering, the error says that instead — check the host, port and
+credentials in the URL.
+
+`GET /api/v1/health` returns 503 with `"database":"unreachable"` when the
+process is up but the database is not.
+
+## Sign-in returns 501
+
+Expected until OAuth is configured. The message names the missing settings.
+Agent endpoints work regardless; only the dashboard API needs sign-in. See
+[server.md](server.md).
+
+## Every runner looks stale
+
+`server.heartbeat.interval` must be shorter than `stale_after`, or a runner is
+stale between every pair of heartbeats. The configuration is validated for
+this, so a server that starts is not misconfigured this way — but a proxy that
+buffers or delays requests can produce the same symptom.
+
 ## Reporting a bug
 
 Include:

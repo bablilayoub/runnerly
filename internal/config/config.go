@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,9 +42,18 @@ const (
 	ExecutorDocker ExecutorType = "docker"
 )
 
+// Agent configures the machine-side agent.
+type Agent struct {
+	// EnrollmentToken is the one-shot token used to enroll with the control
+	// plane. Prefer RUNNERLY_ENROLLMENT_TOKEN; it is consumed once and the
+	// machine token that replaces it is stored separately.
+	EnrollmentToken string `yaml:"enrollment_token"`
+}
+
 // Config is the full Runnerly configuration.
 type Config struct {
 	Server   Server   `yaml:"server"`
+	Agent    Agent    `yaml:"agent"`
 	GitHub   GitHub   `yaml:"github"`
 	Runner   Runner   `yaml:"runner"`
 	Executor Executor `yaml:"executor"`
@@ -51,10 +61,53 @@ type Config struct {
 	Security Security `yaml:"security"`
 }
 
-// Server points the CLI and agent at a Runnerly control plane. It is
-// optional: the CLI is usable without one.
+// Server points the CLI and agent at a Runnerly control plane, and
+// configures the control plane itself. It is optional on a machine that only
+// runs the CLI or an agent.
 type Server struct {
+	// URL is where the control plane can be reached. The agent and CLI use
+	// it; the server itself uses it to build OAuth callback URLs.
 	URL string `yaml:"url"`
+	// Listen is the address runnerly-server binds. It defaults to loopback so
+	// a fresh install is not exposed before TLS is in front of it.
+	Listen string `yaml:"listen"`
+	// Database is the PostgreSQL connection string. Prefer
+	// RUNNERLY_DATABASE_URL, which keeps the password out of the file.
+	Database string `yaml:"database"`
+	// SecretKey encrypts user credentials at rest, hex or base64 encoded,
+	// 32 bytes. Prefer RUNNERLY_SECRET_KEY.
+	SecretKey string    `yaml:"secret_key"`
+	OAuth     OAuth     `yaml:"oauth"`
+	Heartbeat Heartbeat `yaml:"heartbeat"`
+	// EventRetentionDays bounds how long the event feed keeps history. The
+	// control plane is not a log platform.
+	EventRetentionDays int `yaml:"event_retention_days"`
+}
+
+// OAuth configures GitHub sign-in for the dashboard.
+//
+// Runnerly ships no client credentials: a GitHub OAuth App belongs to whoever
+// runs the server. Until these are set, the dashboard's sign-in is disabled
+// and says what is missing. Prefer RUNNERLY_OAUTH_CLIENT_SECRET for the
+// secret.
+type OAuth struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// AllowedLogins restricts who may sign in. Empty allows any GitHub
+	// account that completes the flow, which is only safe on a server that
+	// is not reachable from the internet.
+	AllowedLogins []string `yaml:"allowed_logins"`
+}
+
+// Heartbeat controls how often agents report and when the server stops
+// believing them.
+type Heartbeat struct {
+	// Interval is how often an agent sends a heartbeat.
+	Interval Duration `yaml:"interval"`
+	// StaleAfter is how long without one before a runner is reported stale.
+	StaleAfter Duration `yaml:"stale_after"`
+	// OfflineAfter is how long before it is reported offline.
+	OfflineAfter Duration `yaml:"offline_after"`
 }
 
 // GitHub identifies the GitHub deployment to talk to.
@@ -106,6 +159,19 @@ const (
 // Default returns the configuration used when no file exists.
 func Default() Config {
 	return Config{
+		Server: Server{
+			Listen:             "127.0.0.1:8080",
+			EventRetentionDays: 30,
+			// An empty slice rather than nil, so the documented
+			// `allowed_logins: []` in the template round-trips to exactly
+			// these defaults.
+			OAuth: OAuth{AllowedLogins: []string{}},
+			Heartbeat: Heartbeat{
+				Interval:     Duration(20 * time.Second),
+				StaleAfter:   Duration(30 * time.Second),
+				OfflineAfter: Duration(90 * time.Second),
+			},
+		},
 		GitHub: GitHub{
 			Host:  "github.com",
 			Scope: ScopeRepository,
@@ -305,5 +371,46 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	hb := cfg.Server.Heartbeat
+	if hb.Interval < 0 || hb.StaleAfter < 0 || hb.OfflineAfter < 0 {
+		return errors.New("server.heartbeat: durations must not be negative")
+	}
+	if hb.StaleAfter > 0 && hb.OfflineAfter > 0 && hb.OfflineAfter <= hb.StaleAfter {
+		return fmt.Errorf("server.heartbeat: offline_after (%s) must be longer than stale_after (%s)",
+			hb.OfflineAfter, hb.StaleAfter)
+	}
+	if hb.Interval > 0 && hb.StaleAfter > 0 && hb.Interval >= hb.StaleAfter {
+		return fmt.Errorf("server.heartbeat: interval (%s) must be shorter than stale_after (%s), "+
+			"or every runner will look stale between heartbeats", hb.Interval, hb.StaleAfter)
+	}
+	if cfg.Server.EventRetentionDays < 0 {
+		return errors.New("server.event_retention_days: must not be negative")
+	}
+
 	return nil
 }
+
+// Duration is a time.Duration that reads from YAML as "30s" or "2m".
+type Duration time.Duration
+
+// UnmarshalYAML accepts a duration string.
+func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
+	var raw string
+	if err := node.Decode(&raw); err != nil {
+		return fmt.Errorf("a duration must be a string like \"30s\": %w", err)
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a duration (use a form like 20s, 2m or 1h)", raw)
+	}
+	*d = Duration(parsed)
+	return nil
+}
+
+// MarshalYAML writes the duration back as a string.
+func (d Duration) MarshalYAML() (any, error) { return d.String(), nil }
+
+// Duration returns the value as a time.Duration.
+func (d Duration) Duration() time.Duration { return time.Duration(d) }
+
+func (d Duration) String() string { return time.Duration(d).String() }

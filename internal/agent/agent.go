@@ -19,8 +19,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/bablilayoub/runnerly/internal/controlplane"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 )
@@ -47,6 +49,12 @@ type Options struct {
 	Output io.Writer
 	// Start launches the process. Nil uses the real one; tests supply a fake.
 	Start supervisor.StartFunc
+	// ControlPlane, when set, makes the agent report status and events to a
+	// Runnerly server. Nil means the agent reports only through its log,
+	// which is how it works with no control plane at all.
+	ControlPlane *controlplane.Client
+	// HeartbeatInterval is how often to report. Zero uses the default.
+	HeartbeatInterval time.Duration
 }
 
 // Run supervises the runner until the context is canceled or the backoff
@@ -72,6 +80,20 @@ func Run(ctx context.Context, opts Options) error {
 		output = io.Discard
 	}
 
+	// Reporting is wired in before the supervisor starts, so the first
+	// transition is not missed.
+	var report *reporter
+	if opts.ControlPlane != nil {
+		report = newReporter(opts.ControlPlane, log, opts.HeartbeatInterval)
+	}
+
+	onEvent := func(e supervisor.Event) {
+		logEvent(log, e, opts.Runner.Ephemeral)
+		if report != nil {
+			report.observe(e)
+		}
+	}
+
 	sup, err := supervisor.New(supervisor.Options{
 		Process: supervisor.ProcessOptions{
 			Dir:     opts.Runner.Dir,
@@ -83,7 +105,7 @@ func Run(ctx context.Context, opts Options) error {
 		Ephemeral:   opts.Runner.Ephemeral,
 		StopTimeout: opts.StopTimeout,
 		Start:       opts.Start,
-		OnEvent:     func(e supervisor.Event) { logEvent(log, e, opts.Runner.Ephemeral) },
+		OnEvent:     onEvent,
 	})
 	if err != nil {
 		return err
@@ -94,7 +116,26 @@ func Run(ctx context.Context, opts Options) error {
 		"dir", opts.Runner.Dir,
 		"ephemeral", opts.Runner.Ephemeral,
 		"labels", strings.Join(opts.Runner.Labels, ","),
+		"reporting", report != nil,
 	)
+
+	// The reporter runs alongside supervision and is stopped after it, so a
+	// final "offline" report goes out once the runner really has stopped.
+	var reporting sync.WaitGroup
+	if report != nil {
+		reportCtx, stopReporting := context.WithCancel(context.Background())
+		defer stopReporting()
+
+		reporting.Add(1)
+		go func() {
+			defer reporting.Done()
+			report.run(reportCtx)
+		}()
+		defer func() {
+			stopReporting()
+			reporting.Wait()
+		}()
+	}
 
 	runErr := sup.Run(ctx)
 

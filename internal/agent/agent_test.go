@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -451,4 +452,12 @@ func TestAnEphemeralRunnerFinishingIsNotAWarning(t *testing.T) {
 	if !sawExit {
 		t.Error("no exit was logged")
 	}
+}
+
+// errProcessCrashed stands in for a runner that died.
+var errProcessCrashed = errors.New("crashed")
+
+// testLogger discards output but is not nil, so code under test logs freely.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

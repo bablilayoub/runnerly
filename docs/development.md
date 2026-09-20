@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.24 or newer
+- Go 1.25 or newer
 - `make`
 - Docker, if you want the Docker checks in `doctor` to exercise a real daemon
 
@@ -75,6 +75,7 @@ struct of function fields so tests never touch the machine or the network:
 | `internal/supervisor` | `supervisor.StartFunc` | a fake `Process` the test drives |
 | `internal/agent` | `agent.Options.Start` | the same fake, through the agent |
 | `internal/cli` | `env.newGitHubClient`, `env.runnerEnv` | a client pointed at `httptest` |
+| `internal/server` | `Options.Now` | a clock a test can move forward |
 
 The supervisor is tested both ways on purpose. Fakes cover the state machine —
 backoff, giving up, clearing history, the kill path — deterministically and
@@ -90,6 +91,46 @@ fields, and runs actual arguments through actual flag parsing.
 opts := []option{withGitHub(t, handler), withRunnerEnv(&commands)}
 out, _, err := runCLI(t, opts, "--config", cfg, "runner", "create", "--repo", "acme/widgets")
 ```
+
+## Tests that need PostgreSQL
+
+`internal/store`, `internal/server` and the control plane contract test run
+against a real database. They are integration tests on purpose: the store's
+job is to be correct about SQL, and a mock would only assert that Runnerly
+sends the strings Runnerly expects to send.
+
+Without `RUNNERLY_TEST_DATABASE_URL` they skip, so `go test ./...` works on a
+machine with no PostgreSQL. To run them:
+
+```bash
+docker run -d --name runnerly-test-pg \
+  -e POSTGRES_USER=runnerly -e POSTGRES_PASSWORD=runnerly \
+  -e POSTGRES_DB=runnerly_test -p 55432:5432 postgres:16-alpine
+
+export RUNNERLY_TEST_DATABASE_URL='postgres://runnerly:runnerly@localhost:55432/runnerly_test?sslmode=disable'
+make test
+```
+
+Each test gets a PostgreSQL schema of its own, created and dropped around it
+by `internal/storetest`. That is not gold-plating: Go runs test packages in
+parallel, so sharing one schema meant the store, server and contract suites
+truncated each other's tables mid-run. Each suite passed alone and the three
+together did not.
+
+CI runs them against a PostgreSQL service container, and then checks that
+they did not skip — a skipped suite and a passing one look identical in the
+summary, which is exactly how this coverage would quietly disappear.
+
+## Adding a migration
+
+Add a numbered file to `internal/store/migrations/`. It is embedded at build
+time and applied in filename order, once, inside a transaction with the row
+that records it.
+
+Migrations are forward-only and never edited after they ship: someone else's
+database has already run the old version, so changing it means two databases
+with the same recorded migration and different schemas. Add another file
+instead.
 
 ## Adding a GitHub endpoint
 
@@ -146,7 +187,7 @@ An unstamped build reports `dev`.
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request:
 
-- **test** on Go 1.24 and current stable: formatting, `go mod tidy` cleanliness,
+- **test** on Go 1.25 and current stable: formatting, `go mod tidy` cleanliness,
   `go vet`, and the tests with `-race`
 - **lint**: `golangci-lint` at the pinned version
 - **build**: linux/amd64, linux/arm64 and darwin/arm64, uploading each binary

@@ -19,8 +19,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The oldest Go we support, and whatever is current.
-        go: ["1.24", "stable"]
+        # The oldest Go we support (pgx needs 1.25), and whatever is current.
+        go: ["1.25", "stable"]
+
+    # The store, server and control plane contract tests run against a real
+    # PostgreSQL. They skip when RUNNERLY_TEST_DATABASE_URL is unset, which is
+    # what makes `go test ./...` work on a laptop without one, so CI has to
+    # provide one or that coverage silently disappears.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: runnerly
+          POSTGRES_PASSWORD: runnerly
+          POSTGRES_DB: runnerly_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U runnerly -d runnerly_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      RUNNERLY_TEST_DATABASE_URL: postgres://runnerly:runnerly@localhost:5432/runnerly_test?sslmode=disable
+
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +65,17 @@ jobs:
 
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Check the database tests actually ran
+        # A skipped integration suite looks identical to a passing one, so
+        # fail loudly if the database was not reachable.
+        run: |
+          go test -count=1 -run TestUpsertRunnerIsIdempotent -v ./internal/store/ \
+            | tee /tmp/store.log
+          if grep -q -- '--- SKIP' /tmp/store.log; then
+            echo "::error::the store tests skipped; PostgreSQL was not reachable"
+            exit 1
+          fi
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
@@ -96,4 +130,5 @@ jobs:
           path: |
             dist/runnerly
             dist/runnerly-agent
+            dist/runnerly-server
           if-no-files-found: error

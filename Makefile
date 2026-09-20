@@ -6,6 +6,8 @@ BINARY      := runnerly
 CMD         := ./cmd/runnerly
 AGENT       := runnerly-agent
 AGENT_CMD   := ./cmd/runnerly-agent
+SERVER      := runnerly-server
+SERVER_CMD  := ./cmd/runnerly-server
 DIST        := dist
 PREFIX      ?= /usr/local
 
@@ -37,15 +39,17 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[1m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Build both binaries into dist/
+build: ## Build all three binaries into dist/
 	@mkdir -p $(DIST)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(BINARY) $(CMD)
 	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(AGENT) $(AGENT_CMD)
+	$(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(DIST)/$(SERVER) $(SERVER_CMD)
 
 .PHONY: install
-install: build ## Install both binaries to PREFIX/bin (default /usr/local)
+install: build ## Install all three binaries to PREFIX/bin (default /usr/local)
 	install -m 0755 $(DIST)/$(BINARY) $(PREFIX)/bin/$(BINARY)
 	install -m 0755 $(DIST)/$(AGENT) $(PREFIX)/bin/$(AGENT)
+	install -m 0755 $(DIST)/$(SERVER) $(PREFIX)/bin/$(SERVER)
 
 .PHONY: run
 run: ## Build and run (make run ARGS="doctor --offline")

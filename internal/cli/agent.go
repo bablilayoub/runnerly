@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bablilayoub/runnerly/internal/agent"
+	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/ui"
 )
@@ -87,6 +88,28 @@ func newAgentRunCommand(e *env) *cobra.Command {
 			if !quietRunner {
 				opts.Output = e.errOut
 			}
+
+			cfg, configPath, _, err := e.loadConfig()
+			if err != nil {
+				return err
+			}
+			if serverURL := agent.ServerURLFrom(cfg.Server.URL); serverURL != "" {
+				enrollment, err := agent.Enroll(ctx, agent.EnrollOptions{
+					ServerURL:       serverURL,
+					EnrollmentToken: agent.EnrollmentTokenFrom(cfg.Agent.EnrollmentToken),
+					CredentialsPath: auth.Path(configPath),
+					Runner:          installed,
+					Logger:          logger,
+				})
+				if err != nil {
+					return err
+				}
+				if enrollment != nil {
+					opts.ControlPlane = enrollment.Client
+					opts.HeartbeatInterval = enrollment.Interval
+				}
+			}
+
 			return agent.Run(ctx, opts)
 		},
 	}

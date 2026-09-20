@@ -77,9 +77,22 @@ type Host struct {
 	CreatedAt time.Time `yaml:"created_at,omitempty"`
 }
 
+// Machine is the credential this machine uses with a Runnerly control plane,
+// obtained by enrolling. Like the GitHub token it lives in the 0600
+// credentials file; the same reasoning applies, and the same escape hatch:
+// set RUNNERLY_MACHINE_TOKEN to keep it out of the file.
+type Machine struct {
+	RunnerID   string    `yaml:"runner_id"`
+	Token      string    `yaml:"machine_token"`
+	EnrolledAt time.Time `yaml:"enrolled_at,omitempty"`
+}
+
 // Credentials is the contents of the credentials file.
 type Credentials struct {
 	Hosts map[string]Host `yaml:"hosts"`
+	// Servers is keyed by control plane URL, so one machine can be enrolled
+	// with more than one.
+	Servers map[string]Machine `yaml:"servers,omitempty"`
 }
 
 // Path returns the credentials file that sits beside the given config file.
@@ -89,7 +102,7 @@ func Path(configPath string) string {
 
 // Load reads the credentials file. A missing file is not an error.
 func Load(path string) (Credentials, error) {
-	creds := Credentials{Hosts: map[string]Host{}}
+	creds := Credentials{Hosts: map[string]Host{}, Servers: map[string]Machine{}}
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is operator-supplied by design
 	if err != nil {
@@ -99,10 +112,14 @@ func Load(path string) (Credentials, error) {
 		return creds, fmt.Errorf("read credentials %s: %w", path, err)
 	}
 	if err := yaml.Unmarshal(data, &creds); err != nil {
-		return Credentials{Hosts: map[string]Host{}}, fmt.Errorf("parse credentials %s: %w", path, err)
+		return Credentials{Hosts: map[string]Host{}, Servers: map[string]Machine{}},
+			fmt.Errorf("parse credentials %s: %w", path, err)
 	}
 	if creds.Hosts == nil {
 		creds.Hosts = map[string]Host{}
+	}
+	if creds.Servers == nil {
+		creds.Servers = map[string]Machine{}
 	}
 	return creds, nil
 }
@@ -150,7 +167,7 @@ func Delete(path, host string) (bool, error) {
 
 	// An empty file is tidier than one holding an empty map, and it leaves
 	// nothing behind that looks like a credential.
-	if len(creds.Hosts) == 0 {
+	if len(creds.Hosts) == 0 && len(creds.Servers) == 0 {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, fmt.Errorf("remove credentials %s: %w", path, err)
 		}
@@ -189,6 +206,75 @@ func Resolve(path, host, flagToken string, getenv func(string) string) (Token, e
 
 // EnvVarNames returns the environment variables Resolve consults, in order.
 func EnvVarNames() []string { return append([]string(nil), envVars...) }
+
+// MachineTokenEnvVar overrides the stored machine token, for a deployment
+// that would rather inject it than have the agent write one to disk.
+const MachineTokenEnvVar = "RUNNERLY_MACHINE_TOKEN"
+
+// StoreMachine records the credential for a control plane.
+func StoreMachine(path, serverURL string, m Machine) error {
+	if m.Token == "" {
+		return errors.New("a machine credential needs a token")
+	}
+	creds, err := Load(path)
+	if err != nil {
+		return err
+	}
+	if m.EnrolledAt.IsZero() {
+		m.EnrolledAt = time.Now().UTC().Truncate(time.Second)
+	}
+	creds.Servers[normalizeServer(serverURL)] = m
+	return Save(path, creds)
+}
+
+// ResolveMachine finds the credential for a control plane. The environment
+// wins over the file, as it does for the GitHub token.
+func ResolveMachine(path, serverURL string, getenv func(string) string) (Machine, bool, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if token := strings.TrimSpace(getenv(MachineTokenEnvVar)); token != "" {
+		return Machine{Token: token}, true, nil
+	}
+
+	creds, err := Load(path)
+	if err != nil {
+		return Machine{}, false, err
+	}
+	m, ok := creds.Servers[normalizeServer(serverURL)]
+	if !ok || m.Token == "" {
+		return Machine{}, false, nil
+	}
+	return m, true, nil
+}
+
+// DeleteMachine forgets the credential for a control plane, reporting whether
+// there was one.
+func DeleteMachine(path, serverURL string) (bool, error) {
+	creds, err := Load(path)
+	if err != nil {
+		return false, err
+	}
+	key := normalizeServer(serverURL)
+	if _, ok := creds.Servers[key]; !ok {
+		return false, nil
+	}
+	delete(creds.Servers, key)
+
+	if len(creds.Hosts) == 0 && len(creds.Servers) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("remove credentials %s: %w", path, err)
+		}
+		return true, nil
+	}
+	return true, Save(path, creds)
+}
+
+// normalizeServer makes the lookup key stable across trailing slashes and
+// casing in the host.
+func normalizeServer(raw string) string {
+	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
 
 // ReadToken reads a token from r, taking the first non-empty line. It is used
 // for `runnerly login --with-token`, which reads from stdin so the token never

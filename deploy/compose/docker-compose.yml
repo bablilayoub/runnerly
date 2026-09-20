@@ -1,0 +1,64 @@
+# Runnerly control plane.
+#
+# This runs the server and its database. It does not run an agent: agents live
+# on the machines that execute jobs, which is the whole point of them.
+#
+#   cp .env.example .env     # then edit it
+#   docker compose up -d
+#   docker compose exec server runnerly server enrollment-token create
+#
+# The server binds to loopback on the host by default. Put TLS in front of it
+# before exposing it: machine tokens are bearer credentials, and plain HTTP
+# hands them to anyone on the path.
+
+name: runnerly
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: runnerly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: runnerly
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The server waits for this, so a fresh `up` does not fail on a
+      # database that has not finished starting.
+      test: ["CMD-SHELL", "pg_isready -U runnerly -d runnerly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RUNNERLY_DATABASE_URL: postgres://runnerly:${POSTGRES_PASSWORD:?}@postgres:5432/runnerly?sslmode=disable
+      RUNNERLY_LISTEN: 0.0.0.0:8080
+      # Encrypts signed-in users' GitHub tokens. Generate with:
+      #   runnerly server keygen
+      RUNNERLY_SECRET_KEY: ${RUNNERLY_SECRET_KEY:-}
+      # Dashboard sign-in stays off until these are set. Agent endpoints work
+      # either way.
+      RUNNERLY_OAUTH_CLIENT_ID: ${RUNNERLY_OAUTH_CLIENT_ID:-}
+      RUNNERLY_OAUTH_CLIENT_SECRET: ${RUNNERLY_OAUTH_CLIENT_SECRET:-}
+    ports:
+      # Loopback only. Change this once TLS terminates in front of it.
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/runnerly-server", "-version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres-data:

@@ -15,11 +15,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/bablilayoub/runnerly/internal/agent"
+	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/version"
@@ -75,6 +77,18 @@ func run() int {
 		opts.Output = output
 	}
 
+	// Reporting is optional: an agent with no control plane configured still
+	// supervises its runner and logs what happens.
+	enrollment, err := connect(ctx, *configPath, runner, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	if enrollment != nil {
+		opts.ControlPlane = enrollment.Client
+		opts.HeartbeatInterval = enrollment.Interval
+	}
+
 	if err := agent.Run(ctx, opts); err != nil {
 		// The failure is already in the structured log; this line is for
 		// anyone reading stderr directly.
@@ -82,6 +96,29 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+// connect enrolls with the control plane when one is configured.
+func connect(ctx context.Context, configPath string, runner state.Runner, logger *slog.Logger) (*agent.Enrollment, error) {
+	if configPath == "" {
+		configPath = config.Path()
+	}
+	cfg, _, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL := agent.ServerURLFrom(cfg.Server.URL)
+	if serverURL == "" {
+		return nil, nil
+	}
+	return agent.Enroll(ctx, agent.EnrollOptions{
+		ServerURL:       serverURL,
+		EnrollmentToken: agent.EnrollmentTokenFrom(cfg.Agent.EnrollmentToken),
+		CredentialsPath: auth.Path(configPath),
+		Runner:          runner,
+		Logger:          logger,
+	})
 }
 
 // resolveRunner finds the runner to supervise, by name or by being the only

@@ -20,9 +20,43 @@ const templateText = `# Runnerly configuration
 # Check your edits with: runnerly config validate
 
 server:
-  # Runnerly control plane. Optional: the CLI works without one.
+  # Runnerly control plane. Optional: the CLI and agent work without one.
   # Must start with http:// or https:// when set.
   url: ""
+  # Address runnerly-server binds. Loopback by default so a fresh install is
+  # not exposed before TLS is in front of it.
+  listen: "%s"
+  # PostgreSQL connection string for runnerly-server. Prefer
+  # RUNNERLY_DATABASE_URL, which keeps the password out of this file.
+  database: ""
+  # 32 bytes, hex or base64, encrypting user credentials at rest.
+  # Prefer RUNNERLY_SECRET_KEY. Generate one with: runnerly server keygen
+  secret_key: ""
+  oauth:
+    # A GitHub OAuth App belongs to whoever runs the server, so Runnerly
+    # ships no credentials. Until these are set, dashboard sign-in is off.
+    # Prefer RUNNERLY_OAUTH_CLIENT_SECRET for the secret.
+    client_id: ""
+    client_secret: ""
+    # Restrict who may sign in. Empty allows any GitHub account that
+    # completes the flow, which is only safe on a server that is not
+    # reachable from the internet.
+    allowed_logins: []
+  heartbeat:
+    # How often an agent reports, and when the server stops believing it.
+    # interval must be shorter than stale_after.
+    interval: "%s"
+    stale_after: "%s"
+    offline_after: "%s"
+  # How long the event feed keeps history. The control plane is not a log
+  # platform.
+  event_retention_days: %d
+
+agent:
+  # One-shot token used to enroll with the control plane. Prefer
+  # RUNNERLY_ENROLLMENT_TOKEN. It is consumed once; the machine token that
+  # replaces it is stored in credentials.yaml.
+  enrollment_token: ""
 
 github:
   # GitHub hostname. Use github.com unless you run GitHub Enterprise Server.
@@ -77,6 +111,11 @@ func Template() string {
 	}
 
 	return fmt.Sprintf(templateText,
+		cfg.Server.Listen,
+		cfg.Server.Heartbeat.Interval,
+		cfg.Server.Heartbeat.StaleAfter,
+		cfg.Server.Heartbeat.OfflineAfter,
+		cfg.Server.EventRetentionDays,
 		strings.TrimRight(labels.String(), "\n"),
 		cfg.Executor.Type,
 		cfg.Updates.Auto,

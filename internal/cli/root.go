@@ -247,6 +247,7 @@ func newRootCommand(e *env) *cobra.Command {
 		newRepoCommand(e),
 		newRunnerCommand(e),
 		newAgentCommand(e),
+		newServerCommand(e),
 	)
 	return root
 }

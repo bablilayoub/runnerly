@@ -12,7 +12,7 @@ right now are small and concrete.
 
 ## Setting up
 
-Requires Go 1.24 or newer.
+Requires Go 1.25 or newer.
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git

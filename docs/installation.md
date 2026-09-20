@@ -18,7 +18,7 @@ Ubuntu and Debian are the first-class targets; the remediation commands
 
 ## From source
 
-Requires Go 1.24 or newer.
+Requires Go 1.25 or newer.
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git

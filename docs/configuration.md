@@ -124,11 +124,26 @@ nothing here is ever rewritten under you.
 It is why `runner list`, `runner remove` and the agent work without `--repo` on
 a machine with one runner. See [agent.md](agent.md).
 
+## Control plane settings
+
+`server.*` and `agent.enrollment_token` configure the optional control plane
+and the agent's connection to it. They are documented in
+[server.md](server.md); the short version is that secrets belong in the
+environment rather than this file:
+
+| Setting | Environment variable |
+| --- | --- |
+| `server.database` | `RUNNERLY_DATABASE_URL` |
+| `server.secret_key` | `RUNNERLY_SECRET_KEY` |
+| `server.oauth.client_secret` | `RUNNERLY_OAUTH_CLIENT_SECRET` |
+| `server.url` | `RUNNERLY_SERVER_URL` |
+| `agent.enrollment_token` | `RUNNERLY_ENROLLMENT_TOKEN` |
+
 ## Not yet used
 
-`server.url` and `updates.auto` are read and validated but not yet acted on —
-the components that consume them do not exist. They are in the file now so the
-shape of the configuration does not change under you later.
+`updates.auto` is read and validated but not yet acted on — nothing upgrades
+itself yet. It is in the file now so the shape of the configuration does not
+change under you later.
 
 `security.allow_fork_workflows` is likewise recorded but not enforced;
 `security.allow_public_repositories` **is** enforced, by

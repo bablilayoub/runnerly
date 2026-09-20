@@ -1,0 +1,268 @@
+package server
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/bablilayoub/runnerly/internal/store"
+)
+
+// RegisterRequest is what an agent sends to enroll.
+type RegisterRequest struct {
+	Name          string   `json:"name"`
+	GitHubHost    string   `json:"github_host"`
+	GitHubScope   string   `json:"github_scope"`
+	GitHubScopeID string   `json:"github_scope_id"`
+	OS            string   `json:"os"`
+	Architecture  string   `json:"architecture"`
+	CPUCount      int      `json:"cpu_count"`
+	MemoryBytes   int64    `json:"memory_bytes"`
+	DiskBytes     int64    `json:"disk_bytes"`
+	Labels        []string `json:"labels"`
+	Ephemeral     bool     `json:"ephemeral"`
+	RunnerVersion string   `json:"runner_version"`
+	AgentVersion  string   `json:"agent_version"`
+}
+
+// RegisterResponse carries the credential the agent uses from then on.
+type RegisterResponse struct {
+	Runner store.Runner `json:"runner"`
+	// MachineToken is returned once. The server keeps only its hash.
+	MachineToken string      `json:"machine_token"`
+	Config       AgentConfig `json:"config"`
+}
+
+// AgentConfig is what the server tells an agent about how to behave.
+type AgentConfig struct {
+	HeartbeatIntervalSeconds int `json:"heartbeat_interval_seconds"`
+}
+
+func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
+	token := bearerToken(r)
+	if token == "" {
+		s.fail(w, r, http.StatusUnauthorized, "no_credentials",
+			"Enrolling needs an enrollment token.",
+			"Send it as `Authorization: Bearer rnr_enroll_...`. Create one with "+
+				"`runnerly server enrollment-token create`.")
+		return
+	}
+
+	var req RegisterRequest
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if req.Name == "" || req.GitHubScopeID == "" {
+		s.fail(w, r, http.StatusBadRequest, "invalid_request",
+			"A runner needs a name and a GitHub scope.",
+			"Send name and github_scope_id, for example \"runnerly-01\" and \"acme/widgets\".")
+		return
+	}
+	if req.GitHubScope != store.ScopeRepository && req.GitHubScope != store.ScopeOrganization {
+		s.fail(w, r, http.StatusBadRequest, "invalid_request",
+			"github_scope must be \"repository\" or \"organization\".", "")
+		return
+	}
+
+	// Redeeming first means a machine that fails validation has not burned a
+	// single-use token, and one that passes cannot double-spend it.
+	if _, err := s.store.RedeemEnrollmentToken(r.Context(), token); err != nil {
+		switch {
+		case errors.Is(err, store.ErrTokenInvalid):
+			s.fail(w, r, http.StatusUnauthorized, "invalid_credentials",
+				"The enrollment token was not accepted.",
+				"Create a new one with `runnerly server enrollment-token create`.")
+		case errors.Is(err, store.ErrTokenExhausted):
+			s.fail(w, r, http.StatusForbidden, "token_exhausted",
+				"That enrollment token has expired, been revoked, or been used as many times as allowed.",
+				"Create a new one with `runnerly server enrollment-token create`.")
+		default:
+			s.failInternal(w, r, err, "redeem enrollment token")
+		}
+		return
+	}
+
+	runner, err := s.store.UpsertRunner(r.Context(), store.RegisterRunner{
+		Name:          req.Name,
+		GitHubHost:    req.GitHubHost,
+		GitHubScope:   req.GitHubScope,
+		GitHubScopeID: req.GitHubScopeID,
+		OS:            req.OS,
+		Architecture:  req.Architecture,
+		CPUCount:      req.CPUCount,
+		MemoryBytes:   req.MemoryBytes,
+		DiskBytes:     req.DiskBytes,
+		Labels:        req.Labels,
+		Ephemeral:     req.Ephemeral,
+		RunnerVersion: req.RunnerVersion,
+		AgentVersion:  req.AgentVersion,
+	})
+	if err != nil {
+		s.failInternal(w, r, err, "register runner")
+		return
+	}
+
+	machineToken, err := s.store.IssueMachineToken(r.Context(), runner.ID)
+	if err != nil {
+		s.failInternal(w, r, err, "issue machine token")
+		return
+	}
+
+	if _, err := s.store.RecordEvent(r.Context(), store.NewEvent{
+		RunnerID: runner.ID,
+		Event:    "runner_enrolled",
+		Severity: store.SeverityInfo,
+		Message:  "the machine enrolled with the control plane",
+		Data:     map[string]any{"agent_version": req.AgentVersion},
+	}); err != nil {
+		// The enrollment worked; losing its event is not worth failing it.
+		s.log(r).Warn("could not record the enrollment event",
+			"event", "event_write_failed", "error", err.Error())
+	}
+
+	s.log(r).Info("runner enrolled",
+		"event", "runner_enrolled", "runner", runner.Name, "runner_id", runner.ID)
+
+	s.writeJSON(w, r, http.StatusCreated, RegisterResponse{
+		Runner:       runner,
+		MachineToken: machineToken,
+		Config:       s.agentConfig(),
+	})
+}
+
+// HeartbeatRequest is one report from an agent.
+type HeartbeatRequest struct {
+	Status        string  `json:"status"`
+	StatusDetail  string  `json:"status_detail"`
+	CPUPercent    float64 `json:"cpu"`
+	MemoryPercent float64 `json:"memory"`
+	DiskPercent   float64 `json:"disk"`
+	RunnerVersion string  `json:"runner_version"`
+	AgentVersion  string  `json:"agent_version"`
+}
+
+// HeartbeatResponse tells the agent what the server now believes.
+type HeartbeatResponse struct {
+	Runner store.Runner `json:"runner"`
+	Config AgentConfig  `json:"config"`
+}
+
+func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
+	runner, _ := runnerFrom(r.Context())
+
+	var req HeartbeatRequest
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if req.Status != "" && !validStatus(req.Status) {
+		s.fail(w, r, http.StatusBadRequest, "invalid_request",
+			"status must be one of offline, starting, online, busy, stopping or error.", "")
+		return
+	}
+
+	updated, err := s.store.RecordHeartbeat(r.Context(), runner.ID, store.Heartbeat{
+		Status:        req.Status,
+		StatusDetail:  req.StatusDetail,
+		CPUPercent:    req.CPUPercent,
+		MemoryPercent: req.MemoryPercent,
+		DiskPercent:   req.DiskPercent,
+		RunnerVersion: req.RunnerVersion,
+		AgentVersion:  req.AgentVersion,
+	})
+	if err != nil {
+		s.failStore(w, r, err, "the runner")
+		return
+	}
+
+	s.writeJSON(w, r, http.StatusOK, HeartbeatResponse{Runner: updated, Config: s.agentConfig()})
+}
+
+// EventsRequest is a batch of things that happened between heartbeats.
+type EventsRequest struct {
+	Events []AgentEvent `json:"events"`
+}
+
+// AgentEvent is one reported event.
+type AgentEvent struct {
+	Event    string         `json:"event"`
+	Severity string         `json:"severity"`
+	Message  string         `json:"message"`
+	Data     map[string]any `json:"data"`
+}
+
+// EventsResponse says how many were stored.
+type EventsResponse struct {
+	Stored int `json:"stored"`
+}
+
+// maxEventsPerRequest bounds a batch so one agent cannot fill the table in a
+// single call.
+const maxEventsPerRequest = 200
+
+func (s *Server) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
+	runner, _ := runnerFrom(r.Context())
+
+	var req EventsRequest
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if len(req.Events) > maxEventsPerRequest {
+		s.fail(w, r, http.StatusBadRequest, "too_many_events",
+			"A batch may hold at most 200 events.", "Send them in several requests.")
+		return
+	}
+
+	batch := make([]store.NewEvent, 0, len(req.Events))
+	for _, e := range req.Events {
+		if e.Severity != "" && !validSeverity(e.Severity) {
+			s.fail(w, r, http.StatusBadRequest, "invalid_request",
+				"severity must be one of debug, info, warn or error.", "")
+			return
+		}
+		batch = append(batch, store.NewEvent{
+			// An agent may only write events about its own runner, whatever
+			// it puts in the body.
+			RunnerID: runner.ID,
+			Event:    e.Event,
+			Severity: e.Severity,
+			Message:  e.Message,
+			Data:     e.Data,
+		})
+	}
+
+	stored, err := s.store.RecordEvents(r.Context(), batch)
+	if err != nil {
+		s.failInternal(w, r, err, "record events")
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, EventsResponse{Stored: stored})
+}
+
+func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
+	runner, _ := runnerFrom(r.Context())
+	s.writeJSON(w, r, http.StatusOK, struct {
+		Runner store.Runner `json:"runner"`
+		Config AgentConfig  `json:"config"`
+	}{Runner: runner, Config: s.agentConfig()})
+}
+
+func (s *Server) agentConfig() AgentConfig {
+	return AgentConfig{HeartbeatIntervalSeconds: int(s.heartbeatInterval / time.Second)}
+}
+
+func validStatus(status string) bool {
+	switch status {
+	case store.StatusOffline, store.StatusStarting, store.StatusOnline,
+		store.StatusBusy, store.StatusStopping, store.StatusError:
+		return true
+	}
+	return false
+}
+
+func validSeverity(severity string) bool {
+	switch severity {
+	case store.SeverityDebug, store.SeverityInfo, store.SeverityWarn, store.SeverityError:
+		return true
+	}
+	return false
+}

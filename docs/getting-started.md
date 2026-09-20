@@ -148,11 +148,18 @@ jobs:
 Runnerly refuses to register against a public repository by default. Read
 [security.md](security.md) before overriding that.
 
+## Several machines
+
+Once more than one machine runs a runner, an optional control plane answers
+"what is out there and is it healthy?". Nothing above requires it. See
+[server.md](server.md).
+
 ## Next
 
 - [GitHub integration](github.md)
 - [Runners](runners.md)
 - [The agent](agent.md)
+- [The control plane](server.md)
 - [Configuration](configuration.md)
 - [Security model](security.md) — read this before pointing a runner at a public repository
 - [Troubleshooting](troubleshooting.md)

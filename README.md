@@ -35,16 +35,18 @@ runner running.
 | `runnerly runner create` / `list` / `status` / `remove` | works |
 | `runnerly agent run` / `status` / `systemd` | works |
 | Automatic restart with backoff, systemd service | works |
+| `runnerly-server`: enrollment, heartbeats, events, API | works |
+| Web dashboard | not implemented |
 | Upgrades and ephemeral lifecycle | not implemented |
-| Control plane, heartbeats, dashboard | not implemented |
 
 A runner installed here stays up: the agent restarts it when it fails, and
-systemd restarts the agent. See [docs/architecture.md](docs/architecture.md)
-for where this is going.
+systemd restarts the agent. Point agents at a control plane and it tracks the
+fleet. The dashboard that reads it is the next piece of work — see
+[docs/architecture.md](docs/architecture.md).
 
 ## Try it
 
-Requires Go 1.24 or newer.
+Requires Go 1.25 or newer.
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git
@@ -141,6 +143,26 @@ jobs:
 
 Details in [docs/runners.md](docs/runners.md) and [docs/github.md](docs/github.md).
 
+## Several machines
+
+An optional control plane tracks a fleet. A single machine never needs one.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up -d
+runnerly server enrollment-token create --max-uses 1
+```
+
+Then on each runner machine:
+
+```bash
+export RUNNERLY_SERVER_URL=https://runnerly.example.com
+export RUNNERLY_ENROLLMENT_TOKEN=rnr_enroll_...
+runnerly agent run
+```
+
+The agent trades that one-shot token for a credential of its own and starts
+reporting. Details in [docs/server.md](docs/server.md).
+
 ## Configuration
 
 ```bash
@@ -170,6 +192,7 @@ directory.
 - [GitHub integration](docs/github.md)
 - [Runners](docs/runners.md)
 - [The agent](docs/agent.md)
+- [The control plane](docs/server.md)
 - [Configuration](docs/configuration.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

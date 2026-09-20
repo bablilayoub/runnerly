@@ -165,10 +165,31 @@ the agent no longer need `--repo` on a machine that has one runner.
 It holds no secrets. The runner's own credentials are written by GitHub's
 `config.sh` inside the runner directory, and Runnerly never copies them.
 
-## Not implemented
+## Reporting to a control plane
 
-- **Enrollment and heartbeats.** The plan defines both, but there is no
-  Runnerly control plane to send them to. The agent reports through logs.
+With `server.url` set, the agent also reports to a Runnerly control plane: it
+enrolls once, then sends heartbeats and forwards the same events it logs.
+
+```bash
+export RUNNERLY_SERVER_URL=https://runnerly.example.com
+export RUNNERLY_ENROLLMENT_TOKEN=rnr_enroll_...
+runnerly agent run
+```
+
+The enrollment token is one-shot and is traded for a machine token stored in
+`credentials.yaml`; after that the agent needs neither. See
+[server.md](server.md).
+
+Reporting never gets in supervision's way. Events queue in a buffer and the
+oldest are dropped if the control plane cannot keep up, with the count logged.
+A failed heartbeat is logged and retried on the next tick. A control plane
+that is down does not take a working runner with it.
+
+The agent reports `starting`, `online`, `stopping`, `offline` and `error`. It
+does not report `busy`: whether a job is running is GitHub's view, and the
+agent would have to guess at it by parsing the runner's output.
+
+## Not implemented
 - **Ephemeral lifecycle.** `--ephemeral` is passed to `config.sh` and the agent
   stops on a clean exit, but nothing re-creates the runner afterwards, and
   nothing preserves its logs. A crashed ephemeral runner also exits 0, so it is

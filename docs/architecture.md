@@ -31,14 +31,13 @@ and manages its lifecycle.
 | --- | --- | --- |
 | CLI | `runnerly` | doctor, config, auth, repo, runner and agent commands |
 | Runner agent | `runnerly-agent` | supervision, restart backoff, systemd |
-| Control plane | `runnerly-server` | not implemented |
+| Control plane | `runnerly-server` | enrollment, heartbeats, events, API |
 | Dashboard | web | not implemented |
 
-The agent has no control plane to enroll with or send heartbeats to, so it
-reports through structured logs on stdout. That is deliberate sequencing rather
-than a gap to paper over: a machine with a working, self-healing runner is
-useful on its own, and the enrollment protocol is easier to design once there
-is a server to design it against.
+The control plane is optional at every layer. The CLI works without one, and
+so does the agent: with no `server.url` configured it supervises its runner
+and reports through structured logs, exactly as before. Nothing about a single
+machine requires a database.
 
 The control plane is optional by design. The CLI must stay useful on a machine
 that has never seen a server — `doctor` skips server-dependent checks rather
@@ -49,14 +48,19 @@ than failing them.
 ```text
 cmd/runnerly/        CLI entry point; main() only
 cmd/runnerly-agent/  the daemon systemd runs
+cmd/runnerly-server/ the control plane
 internal/cli/        cobra command tree, flag parsing, exit codes
 internal/agent/      supervising one runner, and its structured logs
 internal/auth/       GitHub credential resolution and storage
 internal/config/     configuration schema, loading, validation
+internal/controlplane/ the agent's client for the server
 internal/doctor/     machine diagnostics and their rendering
 internal/github/     a narrow GitHub REST client
 internal/runner/     installing and configuring actions/runner
+internal/secret/     encrypting credentials the server must read back
+internal/server/     the control plane's HTTP API
 internal/state/      which runners are installed on this machine
+internal/store/      the control plane's PostgreSQL layer, and the schema
 internal/supervisor/ keeping a child process alive
 internal/ui/         terminal output: symbols, color, tables, indentation
 internal/version/    build information, injected via -ldflags
@@ -108,6 +112,28 @@ answers "what am I supervising?" without inferring it. It is also what lets
 `runner list`, `runner remove` and the agent work without `--repo` on a machine
 with one runner.
 
+## Why the agent declares its own wire types
+
+`internal/controlplane` does not import `internal/server`, even though they
+describe the same requests. Sharing the types would drag a PostgreSQL driver
+into `runnerly-agent`, which has no business carrying one.
+
+The cost of duplication is drift, so it is paid for with a contract test:
+`internal/controlplane/contract_test.go` starts a real server against a real
+database and drives it with the real client. That catches a mismatch the way
+a shared struct would, without the coupling.
+
+## Why hashes for some credentials and encryption for others
+
+Enrollment tokens, machine tokens and session cookies are **hashed**. The
+server only needs to recognize one, never read it back, and a hash cannot be
+turned into a working credential by someone with a database dump.
+
+A signed-in user's GitHub token is **encrypted**, because the server may have
+to present it to GitHub. That needs a key, which is why the server has one and
+the CLI does not — and why the CLI stores its own token in a 0600 file and
+says so plainly rather than pretending otherwise.
+
 ## Why the GitHub client is hand-written
 
 Two direct dependencies is the bar (see below), and Runnerly uses six GitHub
@@ -120,11 +146,11 @@ cannot see this", and saying that is worth more than forwarding "Not Found".
 
 Roughly in order:
 
-1. **Control plane** — Postgres-backed inventory, runner events, agent
-   endpoints, machine tokens. This is what agent enrollment and heartbeats
-   need, and neither can be designed honestly without it.
-2. **Dashboard** — React and TypeScript, monochrome, minimal.
-3. **Docker executor**, then **ephemeral runners**.
+1. **Dashboard** — React and TypeScript, monochrome, minimal, on the API that
+   now exists. Restart and upgrade commands belong here too: both need a
+   command channel from server to agent, worth designing alongside the UI that
+   would drive it.
+2. **Docker executor**, then **ephemeral runners**.
 
 Deliberately out of scope until the above is solid: Kubernetes, autoscaling,
 cloud provisioning, GPU scheduling, Windows and macOS runners, and local
@@ -132,9 +158,15 @@ workflow execution.
 
 ## Dependency policy
 
-Two direct dependencies today: `spf13/cobra` for the command tree and
-`gopkg.in/yaml.v3` for configuration. Terminal color, terminal detection and
-HTTP are handled with the standard library.
+Three direct dependencies: `spf13/cobra` for the command tree,
+`gopkg.in/yaml.v3` for configuration, and `jackc/pgx` for PostgreSQL. Terminal
+color, terminal detection, HTTP routing, migrations, UUIDs and cryptography
+are handled with the standard library.
+
+`pgx` was added because speaking the PostgreSQL wire protocol is not something
+to hand-write. Migrations were not: a forward-only runner over embedded SQL is
+about eighty lines, and Go's own `ServeMux` matches methods and path
+parameters, so neither a migration library nor a router earned a place.
 
 Adding a dependency requires an answer to: why do we need it, why can't the
 standard library do it, is it maintained, is its license compatible?
