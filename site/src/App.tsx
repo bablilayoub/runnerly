@@ -484,35 +484,178 @@ function Docs() {
   )
 }
 
+/**
+ * The footer's link columns.
+ *
+ * Every entry goes somewhere that exists. A column of plausible-looking
+ * links to pages nobody has written is the easiest thing in the world to
+ * add and the most annoying thing to click, so there is no Pricing, no
+ * Changelog and no About here.
+ */
+const FOOTER_LINKS: { heading: string; links: { label: string; to: string; external?: boolean }[] }[] = [
+  {
+    heading: "Product",
+    links: [
+      { label: "What it does", to: "#capabilities" },
+      { label: "Ephemeral runners", to: "/docs/ephemeral-runners" },
+      { label: "Docker executor", to: "/docs/docker" },
+      { label: "Control plane", to: "/docs/server" },
+    ],
+  },
+  {
+    heading: "Developers",
+    links: [
+      { label: "Documentation", to: "/docs" },
+      { label: "Installation", to: "/docs/installation" },
+      { label: "Configuration", to: "/docs/configuration" },
+      { label: "Troubleshooting", to: "/docs/troubleshooting" },
+    ],
+  },
+  {
+    heading: "Project",
+    links: [
+      { label: "Architecture", to: "/docs/architecture" },
+      { label: "Security model", to: "/docs/security" },
+      { label: "Contributing", to: `${REPO}/blob/main/CONTRIBUTING.md`, external: true },
+      { label: "License", to: `${REPO}/blob/main/LICENSE`, external: true },
+    ],
+  },
+]
+
 function Footer() {
   return (
-    <footer className="border-t border-border/50 py-12">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="grid size-5 place-items-center rounded border border-border">
-              <TerminalIcon className="size-3" />
-            </span>
-            <span className="text-sm font-medium tracking-tight">Runnerly</span>
+    <footer className="px-6 pb-6">
+      <div className="relative mx-auto w-full max-w-6xl overflow-hidden rounded-3xl border border-border bg-card/30">
+        <div className="relative z-10 px-6 pt-10 sm:px-10 sm:pt-12">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)]">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <span className="grid size-6 place-items-center rounded border border-border">
+                  <TerminalIcon className="size-3.5" />
+                </span>
+                <span className="font-medium tracking-tight">Runnerly</span>
+              </div>
+
+              <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
+                Self-hosted GitHub Actions runners you install, supervise and retire. Free to run,
+                MIT.
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <Button size="sm" asChild className="rounded-full">
+                  <Link to="/docs/installation">Install guide</Link>
+                </Button>
+                <Button size="sm" variant="secondary" asChild className="rounded-full">
+                  <a href={REPO} target="_blank" rel="noreferrer">
+                    <GithubMark className="size-4" />
+                    GitHub
+                  </a>
+                </Button>
+              </div>
+            </div>
+
+            <nav className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+              {FOOTER_LINKS.map(({ heading, links }) => (
+                <div key={heading}>
+                  <h3 className="text-sm font-medium tracking-tight">{heading}</h3>
+                  <ul className="mt-4 space-y-3">
+                    {links.map(({ label, to, external }) => (
+                      <li key={label}>
+                        {external ? (
+                          <a
+                            href={to}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {label}
+                          </a>
+                        ) : to.startsWith("#") ? (
+                          <a
+                            href={to}
+                            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {label}
+                          </a>
+                        ) : (
+                          <Link
+                            to={to}
+                            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {label}
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </nav>
           </div>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            MIT licensed. Self-hosted runners execute your workflow code — read the security model
-            first.
-          </p>
         </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" asChild className="rounded-full">
-            <Link to="/docs/security">Security</Link>
-          </Button>
-          <Button variant="ghost" size="sm" asChild className="rounded-full">
-            <a href={REPO} target="_blank" rel="noreferrer">
-              <GithubMark className="size-4" />
-              GitHub
-            </a>
-          </Button>
+
+        <Wordmark />
+
+        <div className="relative z-10 mx-6 border-t border-border/70 py-5 sm:mx-10">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <p>© {new Date().getFullYear()} Runnerly · MIT</p>
+            <p>
+              Built by{" "}
+              <a
+                href="https://github.com/bablilayoub"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-foreground transition-opacity hover:opacity-70"
+              >
+                Ayoub Bablil
+              </a>
+            </p>
+          </div>
         </div>
       </div>
     </footer>
+  )
+}
+
+/**
+ * The wordmark filling the bottom of the footer, cropped by it.
+ *
+ * SVG rather than styled text because it has to span the card exactly at
+ * every width. A font size in viewport units cannot: it knows the window,
+ * not the container, so the word ran off both edges on a narrow screen and
+ * left a gap on a wide one. A viewBox scales to whatever it is given, and
+ * textLength pins the word to its full width.
+ *
+ * It sits just above the background rather than in a readable grey — this
+ * is texture, not something to read — and is hidden from screen readers,
+ * which have had the name twice already.
+ */
+function Wordmark() {
+  return (
+    <div aria-hidden className="pointer-events-none relative z-0 select-none overflow-hidden px-6 sm:px-10">
+      {/* The viewBox is shorter than the glyphs, which is what crops the
+          descender and the baseline against the footer's bottom edge. */}
+      <svg
+        viewBox="0 0 1200 210"
+        className="block w-full"
+        preserveAspectRatio="xMidYMin meet"
+        role="presentation"
+        focusable="false"
+      >
+        <text
+          x="600"
+          y="235"
+          textAnchor="middle"
+          textLength="1200"
+          lengthAdjust="spacing"
+          fontSize="300"
+          fontWeight="500"
+          className="fill-foreground/[0.06] [font-family:inherit]"
+        >
+          runnerly
+        </text>
+      </svg>
+    </div>
   )
 }
 
