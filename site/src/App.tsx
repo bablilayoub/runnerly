@@ -269,7 +269,11 @@ const STATS = [
 
 function Stats() {
   return (
-    <Section className="border-t-0 py-0 sm:py-0">
+    // No top border or padding, so the band reads as part of the hero.
+    // It does need room underneath: the next section draws a full-width
+    // hairline, and with no gap that line lands exactly on the bottom edge
+    // of the cards and looks like it is slicing through them.
+    <Section className="border-t-0 pb-20 pt-0 sm:pb-28 sm:pt-0">
       <Reveal>
         <Spotlight className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {STATS.map(({ figure, label, note }) => (
