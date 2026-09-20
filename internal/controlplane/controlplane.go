@@ -225,6 +225,17 @@ func (c *Client) CompleteCommand(ctx context.Context, id, failure string) error 
 		c.token, body, nil)
 }
 
+// Retire tells the control plane this runner has finished for good.
+//
+// An ephemeral runner calls it during teardown, so the dashboard can show a
+// finished runner as finished rather than as one that stopped answering.
+func (c *Client) Retire(ctx context.Context, reason string) error {
+	body := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	return c.do(ctx, http.MethodPost, "/api/v1/agent/retire", c.token, body, nil)
+}
+
 // Health checks that the control plane is reachable. It needs no credential.
 func (c *Client) Health(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/api/v1/health", "", nil, nil)

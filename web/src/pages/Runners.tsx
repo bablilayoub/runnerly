@@ -1,16 +1,22 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { useLoad, useNow } from '../hooks'
-import { duration, orDash } from '../format'
+import { duration, orDash, relativeTime } from '../format'
 import { Card, Empty, Failure, Label, Spinner, Status } from '../components/primitives'
 import { Cell, Row, Table } from '../components/Table'
 
 const POLL_MS = 5000
 
 export function Runners() {
-  const { data, error, initial } = useLoad(() => api.runners(), POLL_MS)
+  const [params, setParams] = useSearchParams()
+  // Ephemeral runners retire constantly, so finished ones are hidden until
+  // asked for. Otherwise a machine doing its job all day buries the runners
+  // that are actually in service.
+  const includeRetired = params.get('retired') === 'true'
+
+  const { data, error, initial } = useLoad(() => api.runners(includeRetired), POLL_MS)
   const navigate = useNavigate()
-  useNow() // keep the heartbeat ages moving between polls
+  const now = useNow() // keep the heartbeat ages moving between polls
 
   if (initial) return <Spinner />
   if (error) return <Failure error={error} />
@@ -19,10 +25,32 @@ export function Runners() {
 
   return (
     <Card title={`Runners (${runners.length})`}>
+      <div className="flex justify-end px-4 pt-3">
+        <label
+          className="flex cursor-pointer items-center gap-2 text-xs"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <input
+            type="checkbox"
+            checked={includeRetired}
+            onChange={(e) => {
+              const next = new URLSearchParams(params)
+              if (e.target.checked) next.set('retired', 'true')
+              else next.delete('retired')
+              setParams(next, { replace: true })
+            }}
+          />
+          Include retired
+        </label>
+      </div>
       {runners.length === 0 ? (
         <Empty
-          title="No runners have enrolled"
-          hint="This lists what the control plane knows about, which is not the same as what GitHub has registered."
+          title={includeRetired ? 'No runners at all' : 'No runners in service'}
+          hint={
+            includeRetired
+              ? 'This lists what the control plane knows about, which is not the same as what GitHub has registered.'
+              : 'Finished ephemeral runners are hidden. Tick "include retired" to see them.'
+          }
         />
       ) : (
         <Table head={['Name', 'Status', 'Scope', 'Platform', 'Labels', 'Heartbeat']}>
@@ -58,9 +86,11 @@ export function Runners() {
                 </span>
               </Cell>
               <Cell muted>
-                {runner.last_heartbeat_age_seconds === null
-                  ? 'never'
-                  : `${duration(runner.last_heartbeat_age_seconds)} ago`}
+                {runner.retired_at
+                  ? `retired ${relativeTime(runner.retired_at, now)}`
+                  : runner.last_heartbeat_age_seconds === null
+                    ? 'never'
+                    : `${duration(runner.last_heartbeat_age_seconds)} ago`}
               </Cell>
             </Row>
           ))}

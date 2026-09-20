@@ -149,20 +149,21 @@ than assuming yes; pass `--yes` in a script.
 itself. GitHub recommends this for autoscaling and for a clean environment per
 job.
 
-Runnerly passes the flag through to `config.sh`, and the agent stops
-supervising once the runner exits cleanly. It does not yet manage the lifecycle
-around that: nothing re-creates the runner after its job, and nothing preserves
-its logs.
+`runnerly runner create --ephemeral` registers one. For the whole lifecycle —
+register, one job, cleanup, deregister, destroy — use the dedicated command,
+which also keeps the logs and reports the runner as retired rather than
+offline:
 
-There is also a limitation worth knowing: a crashed runner makes `run.sh` exit
-0 too, so the agent cannot tell "finished a job" from "died" by exit code. It
-treats an ephemeral runner's clean exit as completion and stops. Full support
-is a later milestone.
+```bash
+runnerly ephemeral run --repo acme/widgets
+```
+
+See [ephemeral-runners.md](ephemeral-runners.md).
 
 ## What is not implemented
 
 - upgrades of the runner or of Runnerly itself
-- ephemeral lifecycle management
+- autoscaling: nothing provisions machines or decides how many to run
 
 Starting, supervising and restarting are the agent's job; see
 [agent.md](agent.md). Tracking a fleet is the control plane's; see

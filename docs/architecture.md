@@ -116,6 +116,16 @@ answers "what am I supervising?" without inferring it. It is also what lets
 `runner list`, `runner remove` and the agent work without `--repo` on a machine
 with one runner.
 
+## Why a retired runner is not an offline one
+
+An ephemeral runner finishes and is taken apart. Seen only through
+heartbeats, that is indistinguishable from a machine falling over, and a
+dashboard fills with rows that look like failures but are successes.
+
+So teardown reports the runner retired, and `retired` is a status of its own.
+The row is kept rather than deleted: what a runner did is worth more than the
+row costs, and its events reference it.
+
 ## Why cleanup diffs snapshots instead of pruning
 
 `docker system prune` would be one line. It would also delete a stopped

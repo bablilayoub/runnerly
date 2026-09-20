@@ -13,7 +13,7 @@ const runnerColumns = `
 	status, status_detail, os, architecture, cpu_count, memory_bytes, disk_bytes,
 	labels, ephemeral, runner_version, agent_version,
 	cpu_percent, memory_percent, disk_percent,
-	last_heartbeat, created_at, updated_at`
+	last_heartbeat, retired_at, retired_reason, created_at, updated_at`
 
 // rowScanner is satisfied by both pgx.Row and pgx.Rows.
 type rowScanner interface {
@@ -27,7 +27,7 @@ func scanRunner(row rowScanner) (Runner, error) {
 		&r.Status, &r.StatusDetail, &r.OS, &r.Architecture, &r.CPUCount, &r.MemoryBytes, &r.DiskBytes,
 		&r.Labels, &r.Ephemeral, &r.RunnerVersion, &r.AgentVersion,
 		&r.CPUPercent, &r.MemoryPercent, &r.DiskPercent,
-		&r.LastHeartbeat, &r.CreatedAt, &r.UpdatedAt,
+		&r.LastHeartbeat, &r.RetiredAt, &r.RetiredReason, &r.CreatedAt, &r.UpdatedAt,
 	)
 	return r, wrap(err)
 }
@@ -84,6 +84,11 @@ func (s *Store) UpsertRunner(ctx context.Context, in RegisterRunner) (Runner, er
 			runner_version= EXCLUDED.runner_version,
 			agent_version = EXCLUDED.agent_version,
 			github_scope  = EXCLUDED.github_scope,
+			-- Re-enrolling brings a retired runner back into service. An
+			-- ephemeral name is unique per run, so this only happens when a
+			-- machine deliberately reuses one.
+			retired_at     = NULL,
+			retired_reason = '',
 			updated_at    = now()
 		RETURNING `+runnerColumns,
 		newID(), in.Name, in.GitHubHost, in.GitHubScope, in.GitHubScopeID,
@@ -168,6 +173,10 @@ type ListRunnersOptions struct {
 	// Scope narrows to one repository or organization, as "owner/repo" or
 	// "owner". Empty returns every runner.
 	Scope string
+	// IncludeRetired also returns runners that have finished for good.
+	// Ephemeral runners retire constantly, so the default is to leave them
+	// out and let a caller ask.
+	IncludeRetired bool
 	// Limit caps the result. Zero uses DefaultListLimit.
 	Limit int
 }
@@ -186,8 +195,9 @@ func (s *Store) ListRunners(ctx context.Context, opts ListRunnersOptions) ([]Run
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+runnerColumns+` FROM runners
 		WHERE ($1 = '' OR github_scope_id = $1)
+		  AND ($2 OR retired_at IS NULL)
 		ORDER BY created_at DESC
-		LIMIT $2`, opts.Scope, limit)
+		LIMIT $3`, opts.Scope, opts.IncludeRetired, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list runners: %w", err)
 	}
@@ -217,6 +227,10 @@ func (s *Store) DeleteRunner(ctx context.Context, id string) error {
 }
 
 // Counts summarizes the fleet for the dashboard's overview.
+//
+// Total counts runners still in service. Retired ones are counted separately
+// so a machine that finishes ephemeral runners all day does not report a
+// fleet of thousands.
 type Counts struct {
 	Total   int `json:"total"`
 	Online  int `json:"online"`
@@ -224,19 +238,27 @@ type Counts struct {
 	Offline int `json:"offline"`
 	Stale   int `json:"stale"`
 	Error   int `json:"error"`
+	Retired int `json:"retired"`
 }
 
 // CountRunners summarizes every runner, applying the freshness thresholds so
 // a machine that stopped reporting is counted as offline.
 func (s *Store) CountRunners(ctx context.Context, now time.Time, t Thresholds) (Counts, error) {
-	runners, err := s.ListRunners(ctx, ListRunnersOptions{Limit: 10000})
+	runners, err := s.ListRunners(ctx, ListRunnersOptions{Limit: 10000, IncludeRetired: true})
 	if err != nil {
 		return Counts{}, err
 	}
 
 	var c Counts
-	c.Total = len(runners)
 	for _, r := range runners {
+		if r.Retired() {
+			c.Retired++
+			continue
+		}
+		// Total is runners still in service: a machine finishing ephemeral
+		// runners all day would otherwise report a fleet of thousands.
+		c.Total++
+
 		if r.Health(now, t) == HealthStale {
 			c.Stale++
 		}
@@ -252,4 +274,26 @@ func (s *Store) CountRunners(ctx context.Context, now time.Time, t Thresholds) (
 		}
 	}
 	return c, nil
+}
+
+// RetireRunner marks a runner as finished for good.
+//
+// The row stays: what a runner did is worth more than the row costs, and its
+// events point at it. Retiring is idempotent, so an agent that reports it
+// twice does not overwrite when it first happened.
+func (s *Store) RetireRunner(ctx context.Context, id, reason string) (Runner, error) {
+	row := s.pool.QueryRow(ctx, `
+		UPDATE runners
+		SET retired_at     = COALESCE(retired_at, now()),
+		    retired_reason = CASE WHEN retired_at IS NULL THEN $2 ELSE retired_reason END,
+		    status         = 'offline',
+		    updated_at     = now()
+		WHERE id = $1
+		RETURNING `+runnerColumns, id, reason)
+
+	r, err := scanRunner(row)
+	if err != nil {
+		return Runner{}, fmt.Errorf("retire runner %s: %w", id, err)
+	}
+	return r, nil
 }

@@ -50,15 +50,34 @@ type Agent struct {
 	EnrollmentToken string `yaml:"enrollment_token"`
 }
 
+// Ephemeral configures one-job runners.
+type Ephemeral struct {
+	// LogDir is where a destroyed runner's output is kept. Empty uses a
+	// logs directory beside the configuration.
+	//
+	// It is deliberately outside the runner's own directory: the point of
+	// keeping logs is that they survive the runner being destroyed, and
+	// GitHub warns that ephemeral runner logs have to be preserved
+	// somewhere else to be any use for troubleshooting.
+	LogDir string `yaml:"log_dir"`
+	// KeepRuns is how many runs of logs to keep. Zero keeps them all, which
+	// will eventually fill a disk.
+	KeepRuns int `yaml:"keep_runs"`
+	// NamePrefix is the start of each generated runner name. Empty uses the
+	// machine's hostname.
+	NamePrefix string `yaml:"name_prefix"`
+}
+
 // Config is the full Runnerly configuration.
 type Config struct {
-	Server   Server   `yaml:"server"`
-	Agent    Agent    `yaml:"agent"`
-	GitHub   GitHub   `yaml:"github"`
-	Runner   Runner   `yaml:"runner"`
-	Executor Executor `yaml:"executor"`
-	Updates  Updates  `yaml:"updates"`
-	Security Security `yaml:"security"`
+	Server    Server    `yaml:"server"`
+	Agent     Agent     `yaml:"agent"`
+	Ephemeral Ephemeral `yaml:"ephemeral"`
+	GitHub    GitHub    `yaml:"github"`
+	Runner    Runner    `yaml:"runner"`
+	Executor  Executor  `yaml:"executor"`
+	Updates   Updates   `yaml:"updates"`
+	Security  Security  `yaml:"security"`
 }
 
 // Server points the CLI and agent at a Runnerly control plane, and
@@ -219,7 +238,8 @@ func Default() Config {
 				Timeout: Duration(2 * time.Minute),
 			},
 		},
-		Updates: Updates{Auto: false},
+		Ephemeral: Ephemeral{KeepRuns: 50},
+		Updates:   Updates{Auto: false},
 		Security: Security{
 			AllowPublicRepositories: false,
 			AllowForkWorkflows:      false,
@@ -245,6 +265,14 @@ func (c Config) CleanupAfterJob() bool {
 	}
 	// Empty means the default, which is to clean up.
 	return c.Executor.Docker.Cleanup != CleanupNever
+}
+
+// EphemeralLogDir returns where a destroyed runner's logs are kept.
+func (c Config) EphemeralLogDir(configPath string) string {
+	if c.Ephemeral.LogDir != "" {
+		return c.Ephemeral.LogDir
+	}
+	return filepath.Join(filepath.Dir(configPath), "logs")
 }
 
 // DefaultRunnerDir returns where the official GitHub runner is installed when
@@ -444,6 +472,14 @@ func Validate(cfg Config) error {
 	}
 	if cfg.Server.EventRetentionDays < 0 {
 		return errors.New("server.event_retention_days: must not be negative")
+	}
+
+	if cfg.Ephemeral.KeepRuns < 0 {
+		return errors.New("ephemeral.keep_runs: must not be negative (0 keeps every run)")
+	}
+	if cfg.Ephemeral.NamePrefix != "" && !runnerNamePattern.MatchString(cfg.Ephemeral.NamePrefix) {
+		return fmt.Errorf("ephemeral.name_prefix: %q may only contain letters, digits, '.', '_' and '-'",
+			cfg.Ephemeral.NamePrefix)
 	}
 
 	return nil

@@ -236,3 +236,77 @@ func TestDeletingARunnerTakesItsCommands(t *testing.T) {
 		t.Errorf("got %d commands after deleting the runner, want 0", len(commands))
 	}
 }
+
+func TestRetireRunner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	r, err := s.UpsertRunner(ctx, sampleRunner("ephemeral-01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Retired() {
+		t.Error("a new runner is already retired")
+	}
+
+	retired, err := s.RetireRunner(ctx, r.ID, "ran a job")
+	if err != nil {
+		t.Fatalf("RetireRunner() error = %v", err)
+	}
+	if !retired.Retired() || retired.RetiredReason != "ran a job" {
+		t.Errorf("runner = %+v", retired)
+	}
+
+	// The row survives, because what a runner did is worth more than the
+	// row costs and its events point at it.
+	if _, err := s.Runner(ctx, r.ID); err != nil {
+		t.Errorf("the retired runner was deleted: %v", err)
+	}
+
+	listed, err := s.ListRunners(ctx, ListRunnersOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Errorf("a retired runner appeared in the default listing: %+v", listed)
+	}
+
+	withRetired, err := s.ListRunners(ctx, ListRunnersOptions{IncludeRetired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withRetired) != 1 {
+		t.Errorf("got %d runners with IncludeRetired, want 1", len(withRetired))
+	}
+}
+
+func TestReEnrollingRevivesARetiredRunner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	r, err := s.UpsertRunner(ctx, sampleRunner("runnerly-01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RetireRunner(ctx, r.ID, "done"); err != nil {
+		t.Fatal(err)
+	}
+
+	revived, err := s.UpsertRunner(ctx, sampleRunner("runnerly-01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revived.Retired() {
+		t.Error("a machine that enrolled again is still marked retired")
+	}
+	if revived.ID != r.ID {
+		t.Error("re-enrolling created a second row")
+	}
+}
+
+func TestRetiringAnUnknownRunner(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.RetireRunner(context.Background(), newID(), "done"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound", err)
+	}
+}

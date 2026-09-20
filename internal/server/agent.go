@@ -290,6 +290,51 @@ func (s *Server) handleAgentEvents(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, r, http.StatusOK, EventsResponse{Stored: stored})
 }
 
+// RetireRequest is an agent saying a runner has finished for good.
+type RetireRequest struct {
+	// Reason is why, for the dashboard: "ran its job", "stopped without
+	// running a job", and so on.
+	Reason string `json:"reason"`
+}
+
+// handleAgentRetire marks a runner finished.
+//
+// An ephemeral runner is taken apart when its job ends, and without this the
+// control plane would only see the heartbeats stop — indistinguishable from
+// a machine that fell over. A dashboard full of "offline" rows that are
+// actually successes is worse than no dashboard.
+func (s *Server) handleAgentRetire(w http.ResponseWriter, r *http.Request) {
+	runner, _ := runnerFrom(r.Context())
+
+	var req RetireRequest
+	if !s.decode(w, r, &req) {
+		return
+	}
+
+	retired, err := s.store.RetireRunner(r.Context(), runner.ID, req.Reason)
+	if err != nil {
+		s.failStore(w, r, err, "that runner")
+		return
+	}
+
+	if _, err := s.store.RecordEvent(r.Context(), store.NewEvent{
+		RunnerID: runner.ID,
+		Event:    "runner_retired",
+		Severity: store.SeverityInfo,
+		Message:  req.Reason,
+	}); err != nil {
+		s.log(r).Warn("could not record the retirement event",
+			"event", "event_write_failed", "error", err.Error())
+	}
+	s.log(r).Info("runner retired",
+		"event", "runner_retired", "runner", retired.Name, "reason", req.Reason)
+
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
+		"retired": retired.Name,
+		"at":      retired.RetiredAt,
+	})
+}
+
 func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 	runner, _ := runnerFrom(r.Context())
 	s.writeJSON(w, r, http.StatusOK, struct {

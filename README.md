@@ -38,7 +38,8 @@ runner running.
 | `runnerly-server`: enrollment, heartbeats, events, API | works |
 | Web dashboard: overview, runners, events, restart, remove | works |
 | Docker executor: cleanup between jobs, busy reporting | works |
-| Upgrades and ephemeral lifecycle | not implemented |
+| Ephemeral runners: one job, cleanup, deregister, destroy | works |
+| Upgrades, autoscaling | not implemented |
 
 A runner installed here stays up: the agent restarts it when it fails, and
 systemd restarts the agent. Point agents at a control plane and it tracks the
@@ -208,6 +209,7 @@ directory.
 - [The control plane](docs/server.md)
 - [The dashboard](docs/dashboard.md)
 - [The Docker executor](docs/docker.md)
+- [Ephemeral runners](docs/ephemeral-runners.md)
 - [Configuration](docs/configuration.md)
 - [Security model](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

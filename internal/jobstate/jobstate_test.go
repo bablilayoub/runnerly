@@ -95,7 +95,14 @@ func TestDescribe(t *testing.T) {
 		state State
 		want  string
 	}{
-		{"idle", State{Status: StatusIdle}, ""},
+		{"never ran", State{Status: StatusIdle}, ""},
+		{"finished", State{
+			Status:     StatusIdle,
+			Repository: "acme/widgets",
+			Workflow:   "test",
+			StartedAt:  time.Now().Add(-time.Minute),
+			FinishedAt: time.Now(),
+		}, "acme/widgets / test"},
 		{"full", State{Status: StatusRunning, Repository: "acme/widgets", Workflow: "test"}, "acme/widgets / test"},
 		{"repository only", State{Status: StatusRunning, Repository: "acme/widgets"}, "acme/widgets"},
 		{"nothing known", State{Status: StatusRunning}, "a job"},

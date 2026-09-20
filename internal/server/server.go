@@ -171,6 +171,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/agent/events", s.requireMachine(s.handleAgentEvents))
 	mux.HandleFunc("GET /api/v1/agent/config", s.requireMachine(s.handleAgentConfig))
 	mux.HandleFunc("POST /api/v1/agent/commands/{id}/result", s.requireMachine(s.handleAgentCommandResult))
+	mux.HandleFunc("POST /api/v1/agent/retire", s.requireMachine(s.handleAgentRetire))
 
 	// Dashboard sign-in.
 	mux.HandleFunc("GET /api/v1/auth/config", s.handleAuthConfig)

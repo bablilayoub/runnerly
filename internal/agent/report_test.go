@@ -108,7 +108,7 @@ func TestShutdownEventsReachTheControlPlane(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runAgent(ctx, Options{
 			Runner:            r,
 			ControlPlane:      fake.client(),
 			HeartbeatInterval: time.Hour, // only the final heartbeat should fire
@@ -153,7 +153,7 @@ func TestSupervisorEventsBecomeControlPlaneEvents(t *testing.T) {
 	fake := newFakeControlPlane(t)
 	r := installedRunner(t, "runnerly-01")
 
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:            r,
 		ControlPlane:      fake.client(),
 		HeartbeatInterval: time.Hour,
@@ -193,7 +193,7 @@ func TestReportingFailuresDoNotStopSupervision(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runAgent(ctx, Options{
 			Runner:            r,
 			ControlPlane:      client,
 			HeartbeatInterval: 5 * time.Millisecond,

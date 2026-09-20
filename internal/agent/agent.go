@@ -77,16 +77,25 @@ type HookOptions struct {
 	ConfigPath string
 }
 
+// Outcome describes how a run ended.
+type Outcome struct {
+	// Completed is true when an ephemeral runner finished a job, as opposed
+	// to exiting for any other reason. Only an ephemeral run sets it.
+	Completed bool
+	// Job is what the runner last did, when the job hooks recorded it.
+	Job jobstate.State
+}
+
 // Run supervises the runner until the context is canceled or the backoff
 // policy gives up.
-func Run(ctx context.Context, opts Options) error {
+func Run(ctx context.Context, opts Options) (Outcome, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
 	script, err := Preflight(opts.Runner)
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 
 	log := opts.Logger.With(
@@ -121,21 +130,24 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Reporting is wired in before the supervisor starts, so the first
 	// transition is not missed.
+	// The job hooks are the only source of truth for what the runner is
+	// actually doing, so both busy reporting and ephemeral completion read
+	// from the same place.
+	statePath := jobstate.Path(opts.Runner.Dir)
+	readJob := func() jobstate.State {
+		state, err := jobstate.Read(statePath)
+		if err != nil {
+			log.Warn("could not read the job state",
+				"event", "job_state_unreadable", "error", err.Error())
+		}
+		return state
+	}
+
 	var report *reporter
 	if opts.ControlPlane != nil {
 		report = newReporter(opts.ControlPlane, log, opts.HeartbeatInterval)
-		// Whether a job is running is the hooks' answer, not something the
-		// agent can infer from the process being alive.
 		if opts.Hooks.Install {
-			statePath := jobstate.Path(opts.Runner.Dir)
-			report.jobState = func() jobstate.State {
-				state, err := jobstate.Read(statePath)
-				if err != nil {
-					log.Warn("could not read the job state",
-						"event", "job_state_unreadable", "error", err.Error())
-				}
-				return state
-			}
+			report.jobState = readJob
 		}
 	}
 
@@ -159,9 +171,13 @@ func Run(ctx context.Context, opts Options) error {
 		StopTimeout: opts.StopTimeout,
 		Start:       opts.Start,
 		OnEvent:     onEvent,
+		// An ephemeral runner's run.sh exits 0 whether it finished a job or
+		// its listener was killed, so the exit code cannot be trusted to
+		// mean "done". Ask the hooks whether a job actually ran.
+		EphemeralDone: ephemeralDone(opts, readJob, log),
 	})
 	if err != nil {
-		return err
+		return Outcome{}, err
 	}
 
 	// The supervisor exists now, so a restart command has something to act
@@ -199,12 +215,48 @@ func Run(ctx context.Context, opts Options) error {
 
 	runErr := sup.Run(ctx)
 
+	outcome := Outcome{Job: readJob()}
+	// A completed run is one that ended on its own, cleanly, having done a
+	// job. Cancellation and failure are neither.
+	outcome.Completed = opts.Runner.Ephemeral && runErr == nil &&
+		ctx.Err() == nil && outcome.Job.FinishedAJob()
+
 	if runErr != nil {
 		log.Error("agent stopped", "event", "agent_failed", "error", runErr.Error())
-		return runErr
+		return outcome, runErr
+	}
+	if outcome.Completed {
+		log.Info("the ephemeral runner finished its job",
+			"event", "job_completed",
+			"job", outcome.Job.Describe(),
+			"duration_seconds", outcome.Job.Duration().Seconds(),
+		)
 	}
 	log.Info("agent stopped", "event", "agent_stopped")
-	return nil
+	return outcome, nil
+}
+
+// ephemeralDone builds the predicate the supervisor uses to decide whether a
+// clean exit finished the work.
+//
+// Without job hooks there is nothing better than the exit code, so the
+// behavior is unchanged: any clean exit ends supervision. That is stated
+// rather than silently assumed, because it is the case where an ephemeral
+// runner can stop after a crash without having run anything.
+func ephemeralDone(opts Options, readJob func() jobstate.State, log *slog.Logger) func() bool {
+	if !opts.Runner.Ephemeral || !opts.Hooks.Install {
+		return nil
+	}
+	return func() bool {
+		job := readJob()
+		if job.FinishedAJob() {
+			return true
+		}
+		log.Warn("the runner exited cleanly without running a job, so it is being restarted",
+			"event", "ephemeral_no_job",
+			"hint", "an ephemeral runner that exits without work has usually lost its connection")
+		return false
+	}
 }
 
 // Preflight checks that a runner really is installed and ready, and returns

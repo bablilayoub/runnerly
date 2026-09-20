@@ -979,3 +979,138 @@ func TestTheDashboardIsServedAndDoesNotShadowTheAPI(t *testing.T) {
 			rec.Header().Get("Content-Type"))
 	}
 }
+
+func TestRetiringARunnerMarksItFinishedRatherThanOffline(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	machineToken, runner := h.enroll("ephemeral-01")
+
+	rec := h.do(http.MethodPost, "/api/v1/agent/retire",
+		RetireRequest{Reason: "ran acme/widgets / test"}, withBearer(machineToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	got, err := h.store.Runner(context.Background(), runner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Retired() {
+		t.Fatal("the runner was not marked retired")
+	}
+	if got.EffectiveStatus(time.Now(), store.DefaultThresholds()) != store.StatusRetired {
+		t.Error("a retired runner still reports as offline, which reads as a failure")
+	}
+
+	// Hidden from the default listing, because ephemeral runners retire
+	// constantly and would bury the ones still in service.
+	rec = h.do(http.MethodGet, "/api/v1/runners", nil, session)
+	var listed RunnersResponse
+	decode(t, rec, &listed)
+	if len(listed.Runners) != 0 {
+		t.Errorf("a retired runner appeared in the default listing: %+v", listed.Runners)
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/runners?retired=true", nil, session)
+	var all RunnersResponse
+	decode(t, rec, &all)
+	if len(all.Runners) != 1 || all.Runners[0].Status != store.StatusRetired {
+		t.Errorf("runners = %+v", all.Runners)
+	}
+	if all.Runners[0].RetiredReason != "ran acme/widgets / test" {
+		t.Errorf("RetiredReason = %q", all.Runners[0].RetiredReason)
+	}
+}
+
+func TestRetiringTwiceKeepsTheFirstTime(t *testing.T) {
+	h := newHarness(t)
+	machineToken, runner := h.enroll("ephemeral-01")
+
+	if rec := h.do(http.MethodPost, "/api/v1/agent/retire",
+		RetireRequest{Reason: "first"}, withBearer(machineToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	first, err := h.store.Runner(context.Background(), runner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := h.do(http.MethodPost, "/api/v1/agent/retire",
+		RetireRequest{Reason: "second"}, withBearer(machineToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	second, err := h.store.Runner(context.Background(), runner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !second.RetiredAt.Equal(*first.RetiredAt) || second.RetiredReason != "first" {
+		t.Errorf("a repeated report overwrote when it first retired: %+v", second)
+	}
+}
+
+func TestRetiredRunnersAreCountedSeparately(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+
+	liveToken, _ := h.enroll("live-01")
+	retiredToken, _ := h.enroll("ephemeral-01")
+
+	if rec := h.do(http.MethodPost, "/api/v1/agent/heartbeat",
+		HeartbeatRequest{Status: store.StatusOnline}, withBearer(liveToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+	if rec := h.do(http.MethodPost, "/api/v1/agent/retire",
+		RetireRequest{Reason: "done"}, withBearer(retiredToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+
+	rec := h.do(http.MethodGet, "/api/v1/overview", nil, session)
+	var overview OverviewResponse
+	decode(t, rec, &overview)
+
+	// A machine finishing ephemeral runners all day must not report a fleet
+	// of thousands, nor a pile of offline failures.
+	if overview.Runners.Total != 1 {
+		t.Errorf("Total = %d, want only the runner in service", overview.Runners.Total)
+	}
+	if overview.Runners.Retired != 1 {
+		t.Errorf("Retired = %d, want 1", overview.Runners.Retired)
+	}
+	if overview.Runners.Offline != 0 {
+		t.Errorf("Offline = %d; a retired runner is not an offline one", overview.Runners.Offline)
+	}
+}
+
+func TestRetireRecordsAnEvent(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	machineToken, _ := h.enroll("ephemeral-01")
+
+	if rec := h.do(http.MethodPost, "/api/v1/agent/retire",
+		RetireRequest{Reason: "ran acme/widgets"}, withBearer(machineToken)); rec.Code != http.StatusOK {
+		t.Fatal(rec.Body)
+	}
+
+	rec := h.do(http.MethodGet, "/api/v1/events", nil, session)
+	var events EventsListResponse
+	decode(t, rec, &events)
+
+	var found bool
+	for _, e := range events.Events {
+		if e.Event == "runner_retired" && e.Message == "ran acme/widgets" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no retirement event in the feed: %+v", events.Events)
+	}
+}
+
+func TestRetireNeedsAMachineToken(t *testing.T) {
+	h := newHarness(t)
+	session := h.signIn("octocat")
+	if rec := h.do(http.MethodPost, "/api/v1/agent/retire", RetireRequest{}, session); rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401: a session is not a machine", rec.Code)
+	}
+}

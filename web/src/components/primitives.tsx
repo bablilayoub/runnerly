@@ -10,7 +10,9 @@ export function StatusDot({ status }: { status: RunnerStatus }) {
         ? 'var(--busy)'
         : status === 'error'
           ? 'var(--bad)'
-          : 'var(--text-faint)'
+          : // Retired and offline are both quiet, because a retired runner
+            // finished on purpose and is not a problem to look at.
+            'var(--text-faint)'
 
   return (
     <span
@@ -27,7 +29,9 @@ export function Status({ status, health }: { status: RunnerStatus; health?: Heal
     <span className="inline-flex items-center gap-2 whitespace-nowrap">
       <StatusDot status={status} />
       <span>{status}</span>
-      {health === 'stale' && (
+      {/* A retired runner is already offline by definition, so saying it is
+          also stale would be noise. */}
+      {health === 'stale' && status !== 'retired' && (
         <span className="text-xs" style={{ color: 'var(--warn)' }}>
           stale
         </span>

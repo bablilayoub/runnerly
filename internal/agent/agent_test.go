@@ -172,7 +172,7 @@ func TestRunLogsTheRunnerLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runAgent(ctx, Options{
 			Runner: r,
 			Logger: logger,
 			Start: func(opts supervisor.ProcessOptions) (supervisor.Process, error) {
@@ -227,7 +227,7 @@ func TestRunReportsRestartsAndGivingUp(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Logger:  logger,
 		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 2},
@@ -270,7 +270,7 @@ func TestEphemeralRunnerStopsAfterACleanExit(t *testing.T) {
 	r.Ephemeral = true
 
 	starts := 0
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 3},
 		Start: func(supervisor.ProcessOptions) (supervisor.Process, error) {
@@ -289,7 +289,7 @@ func TestEphemeralRunnerStopsAfterACleanExit(t *testing.T) {
 }
 
 func TestRunRefusesAnUninstalledRunner(t *testing.T) {
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner: state.Runner{Name: "ghost", Dir: filepath.Join(t.TempDir(), "absent")},
 	})
 	if err == nil {
@@ -302,7 +302,7 @@ func TestRunnerOutputIsKeptOutOfTheAgentLog(t *testing.T) {
 	var agentLog, runnerOut bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&agentLog, nil))
 
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Logger:  logger,
 		Output:  &runnerOut,
@@ -403,7 +403,7 @@ func TestACleanExitIsStillAWarningForALongLivedRunner(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Logger:  logger,
 		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
@@ -431,7 +431,7 @@ func TestAnEphemeralRunnerFinishingIsNotAWarning(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
-	if err := Run(context.Background(), Options{
+	if err := runAgent(context.Background(), Options{
 		Runner: r,
 		Logger: logger,
 		Start: func(supervisor.ProcessOptions) (supervisor.Process, error) {
@@ -508,7 +508,7 @@ func TestRunnerInheritsTheEnvironmentPlusWhatRunnerlyAdds(t *testing.T) {
 	t.Setenv("RUNNERLY_TEST_MARKER", "present")
 
 	var got []string
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:   r,
 		ExtraEnv: []string{"DOCKER_HOST=unix:///custom.sock"},
 		Backoff:  supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
@@ -541,7 +541,7 @@ func TestHooksAreInstalledAndPointedAt(t *testing.T) {
 	r := installedRunner(t, "runnerly-01")
 
 	var got []string
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Hooks:   HookOptions{Install: true, Binary: "/usr/local/bin/runnerly", ConfigPath: "/etc/c.yaml"},
 		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
@@ -573,7 +573,7 @@ func TestAFailedHookInstallDoesNotStopTheRunner(t *testing.T) {
 	// No binary path, so installing the hooks fails. The runner must still
 	// run: unobserved is better than not running at all.
 	started := false
-	err := Run(context.Background(), Options{
+	err := runAgent(context.Background(), Options{
 		Runner:  r,
 		Hooks:   HookOptions{Install: true, ConfigPath: "/etc/c.yaml"},
 		Backoff: supervisor.Backoff{Initial: time.Millisecond, Factor: 1, MaxRestarts: 1},
@@ -611,7 +611,7 @@ func TestBusyIsReportedFromTheJobHooks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runAgent(ctx, Options{
 			Runner:            r,
 			ControlPlane:      fake.client(),
 			HeartbeatInterval: 10 * time.Millisecond,
@@ -655,7 +655,7 @@ func TestWithoutHooksTheAgentDoesNotGuessBusy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Options{
+		done <- runAgent(ctx, Options{
 			Runner:            r,
 			ControlPlane:      fake.client(),
 			HeartbeatInterval: 10 * time.Millisecond,
@@ -676,4 +676,11 @@ func TestWithoutHooksTheAgentDoesNotGuessBusy(t *testing.T) {
 			t.Error("the agent reported busy without job hooks installed")
 		}
 	}
+}
+
+// runAgent is Run with the outcome dropped, for the tests that only care
+// whether it failed.
+func runAgent(ctx context.Context, opts Options) error {
+	_, err := Run(ctx, opts)
+	return err
 }

@@ -205,10 +205,8 @@ sits unresolved, and a command it does not understand comes back as failed
 rather than being ignored.
 
 ## Not implemented
-- **Ephemeral lifecycle.** `--ephemeral` is passed to `config.sh` and the agent
-  stops on a clean exit, but nothing re-creates the runner afterwards, and
-  nothing preserves its logs. A crashed ephemeral runner also exits 0, so it is
-  indistinguishable from one that finished its job — the agent treats it as
-  finished and stops.
+- **Autoscaling.** Nothing provisions machines or decides how many runners
+  to run. Ephemeral runners themselves work; see
+  [ephemeral-runners.md](ephemeral-runners.md).
 - **Upgrades.** Neither the agent nor the runner updates itself. The command
   channel could carry it; nothing implements it yet.

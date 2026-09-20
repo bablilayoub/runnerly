@@ -100,7 +100,7 @@ func run() int {
 		opts.HeartbeatInterval = enrollment.Interval
 	}
 
-	if err := agent.Run(ctx, opts); err != nil {
+	if _, err := agent.Run(ctx, opts); err != nil {
 		// The failure is already in the structured log; this line is for
 		// anyone reading stderr directly.
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

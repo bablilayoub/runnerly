@@ -2,7 +2,8 @@
 // generated: the API is small, and a generator would be another build step to
 // keep working for no benefit at this size.
 
-export type RunnerStatus = 'offline' | 'starting' | 'online' | 'busy' | 'stopping' | 'error'
+export type RunnerStatus =
+  'offline' | 'starting' | 'online' | 'busy' | 'stopping' | 'error' | 'retired'
 export type Health = 'healthy' | 'stale' | 'offline'
 export type Severity = 'debug' | 'info' | 'warn' | 'error'
 export type CommandStatus = 'pending' | 'delivered' | 'done' | 'failed'
@@ -31,17 +32,22 @@ export interface Runner {
   memory_percent: number
   disk_percent: number
   last_heartbeat?: string
+  /** Set when the runner finished for good, which is how an ephemeral run ends. */
+  retired_at?: string
+  retired_reason?: string
   created_at: string
   updated_at: string
 }
 
 export interface Counts {
+  /** Runners still in service. Retired ones are counted separately. */
   total: number
   online: number
   busy: number
   offline: number
   stale: number
   error: number
+  retired: number
 }
 
 export interface RunnerEvent {

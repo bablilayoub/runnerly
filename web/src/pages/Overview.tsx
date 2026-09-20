@@ -27,6 +27,17 @@ export function Overview() {
         <Stat label="Errored" value={runners.error} />
       </div>
 
+      {runners.retired > 0 && (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          {runners.retired} runner{runners.retired === 1 ? ' has' : 's have'} retired. Ephemeral
+          runners retire after their job, so this counts completed runs rather than problems.{' '}
+          <Link to="/runners?retired=true" className="underline">
+            Show them
+          </Link>
+          .
+        </p>
+      )}
+
       {runners.stale > 0 && (
         <p className="text-sm" style={{ color: 'var(--warn)' }}>
           {runners.stale} runner{runners.stale === 1 ? '' : 's'} have not reported in over{' '}

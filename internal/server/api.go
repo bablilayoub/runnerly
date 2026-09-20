@@ -86,7 +86,11 @@ func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
 
 	runners, err := s.store.ListRunners(r.Context(), store.ListRunnersOptions{
 		Scope: r.URL.Query().Get("scope"),
-		Limit: limit,
+		// Ephemeral runners retire constantly, so a listing leaves them out
+		// unless asked. Otherwise a machine doing its job all day buries
+		// the runners that are actually in service.
+		IncludeRetired: r.URL.Query().Get("retired") == "true",
+		Limit:          limit,
 	})
 	if err != nil {
 		s.failInternal(w, r, err, "list runners")

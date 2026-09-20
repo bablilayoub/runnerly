@@ -112,7 +112,8 @@ func newAgentRunCommand(e *env) *cobra.Command {
 				}
 			}
 
-			return agent.Run(ctx, opts)
+			_, err = agent.Run(ctx, opts)
+			return err
 		},
 	}
 

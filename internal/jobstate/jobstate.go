@@ -61,17 +61,41 @@ type State struct {
 // Running reports whether a job is in progress.
 func (s State) Running() bool { return s.Status == StatusRunning }
 
+// RanAJob reports whether a job has started here at all, finished or not.
+//
+// An ephemeral runner uses this to tell a completed job from a crash: its
+// run.sh exits 0 either way, so the exit code proves nothing.
+func (s State) RanAJob() bool { return !s.StartedAt.IsZero() }
+
+// FinishedAJob reports whether a job started and then finished.
+func (s State) FinishedAJob() bool {
+	return s.RanAJob() && !s.FinishedAt.IsZero() && s.Status == StatusIdle
+}
+
+// Duration is how long the job took, or zero if it is still running or never
+// ran.
+func (s State) Duration() time.Duration {
+	if !s.FinishedAJob() {
+		return 0
+	}
+	return s.FinishedAt.Sub(s.StartedAt)
+}
+
 // Describe summarizes the job for a log line or a dashboard.
+//
+// It describes a finished job as readily as a running one: an ephemeral
+// runner reports what it did after the fact, and gating this on Running
+// meant that summary came out blank.
 func (s State) Describe() string {
 	switch {
-	case !s.Running():
-		return ""
 	case s.Repository != "" && s.Workflow != "":
 		return s.Repository + " / " + s.Workflow
 	case s.Repository != "":
 		return s.Repository
-	default:
+	case s.Running() || s.RanAJob():
 		return "a job"
+	default:
+		return ""
 	}
 }
 

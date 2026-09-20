@@ -1,0 +1,38 @@
+# A job for proving a self-hosted runner actually works.
+#
+# It runs only when someone asks for it, so a repository with no self-hosted
+# runner attached is unaffected and pushes never queue a job that nothing
+# will pick up:
+#
+#   gh workflow run selfhosted-smoke.yml
+#
+# The runner must carry the `smoke` label:
+#
+#   runnerly ephemeral run --repo <owner>/<repo> --labels smoke
+name: self-hosted smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, smoke]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report where this ran
+        run: |
+          echo "runner:  ${RUNNER_NAME}"
+          echo "os:      ${RUNNER_OS}/${RUNNER_ARCH}"
+          echo "workdir: $(pwd)"
+
+      - name: Build and test
+        run: |
+          go version
+          go build ./...
+          go test ./internal/version/ ./internal/ui/

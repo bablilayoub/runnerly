@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/bablilayoub/runnerly/internal/agent"
 	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/config"
 	"github.com/bablilayoub/runnerly/internal/docker"
@@ -51,6 +53,9 @@ type env struct {
 	// newDockerClient builds the Docker client. Nil uses the real one; tests
 	// replace it so no daemon is needed.
 	newDockerClient func(config.Config) *docker.Client
+	// runAgent supervises a runner. Nil uses the real agent; tests replace
+	// it so no process is started.
+	runAgent func(context.Context, agent.Options) (agent.Outcome, error)
 }
 
 // newEnv returns the default environment, wired to the real GitHub.
@@ -252,6 +257,7 @@ func newRootCommand(e *env) *cobra.Command {
 		newRunnerCommand(e),
 		newAgentCommand(e),
 		newServerCommand(e),
+		newEphemeralCommand(e),
 	)
 	return root
 }

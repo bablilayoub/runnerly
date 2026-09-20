@@ -70,8 +70,10 @@ them with `ACTIONS_RUNNER_HOOK_JOB_STARTED` and `..._COMPLETED`.
 They are rewritten every time the agent starts, so they never point at a
 binary that has moved.
 
-That mechanism also answers something the agent could not previously know:
-whether the runner is **busy**. Before this, the agent could see the runner
+The hooks also answer two things Runnerly could not otherwise know. One is
+whether an ephemeral runner really finished a job or merely exited; see
+[ephemeral-runners.md](ephemeral-runners.md). The other is whether the runner
+is **busy**. Before this, the agent could see the runner
 process was alive but not whether it was running anything, so a machine at
 full load reported "online". Now `busy` is what the runner itself said.
 

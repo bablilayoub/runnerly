@@ -52,6 +52,18 @@ server:
   # platform.
   event_retention_days: %d
 
+ephemeral:
+  # One-job runners. See docs/ephemeral-runners.md.
+  #
+  # Where a destroyed runner's output is kept. Empty uses a logs directory
+  # beside this file. It is outside the runner's own directory on purpose:
+  # the point is that the logs outlive the runner.
+  log_dir: ""
+  # How many runs of logs to keep. 0 keeps every one of them.
+  keep_runs: %d
+  # The start of each generated runner name. Empty uses the hostname.
+  name_prefix: ""
+
 agent:
   # One-shot token used to enroll with the control plane. Prefer
   # RUNNERLY_ENROLLMENT_TOKEN. It is consumed once; the machine token that
@@ -129,6 +141,7 @@ func Template() string {
 		cfg.Server.Heartbeat.StaleAfter,
 		cfg.Server.Heartbeat.OfflineAfter,
 		cfg.Server.EventRetentionDays,
+		cfg.Ephemeral.KeepRuns,
 		strings.TrimRight(labels.String(), "\n"),
 		cfg.Executor.Type,
 		cfg.Executor.Docker.Cleanup,

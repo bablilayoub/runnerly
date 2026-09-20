@@ -80,13 +80,27 @@ export function RunnerDetail() {
               {r.status_detail}
             </p>
           )}
+          {r.retired_at && (
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+              Retired {relativeTime(r.retired_at, now)}
+              {r.retired_reason ? `: ${r.retired_reason}` : ''}. An ephemeral runner retires when
+              its job is done, so this is a finished run rather than a failure.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-2">
           <Button
             onClick={() => setConfirming('restart')}
-            disabled={pending.length > 0}
-            title={pending.length > 0 ? 'A restart is already queued' : undefined}
+            // A retired runner has no agent left to collect the command.
+            disabled={pending.length > 0 || Boolean(r.retired_at)}
+            title={
+              r.retired_at
+                ? 'This runner has retired; there is no agent to restart'
+                : pending.length > 0
+                  ? 'A restart is already queued'
+                  : undefined
+            }
           >
             {pending.length > 0 ? 'Restart queued' : 'Restart'}
           </Button>

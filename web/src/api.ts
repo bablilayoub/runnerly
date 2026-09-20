@@ -69,7 +69,8 @@ export const api = {
 
   overview: () => request<Overview>('/overview'),
 
-  runners: () => request<{ runners: Runner[] }>('/runners'),
+  runners: (includeRetired = false) =>
+    request<{ runners: Runner[] }>(`/runners${includeRetired ? '?retired=true' : ''}`),
   runner: (id: string) => request<Runner>(`/runners/${encodeURIComponent(id)}`),
   deleteRunner: (id: string) =>
     request<{ deleted: string; note: string }>(`/runners/${encodeURIComponent(id)}`, {

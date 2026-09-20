@@ -30,6 +30,10 @@ has not yet crossed the offline threshold is the case worth noticing early.
 **Runners** — every runner the control plane knows about, with status, scope,
 platform, labels and how long ago each last reported.
 
+Retired runners are hidden unless you ask for them. An ephemeral runner
+retires after its job, so a busy machine would otherwise bury the runners
+actually in service under a list of completed ones.
+
 This is Runnerly's view, not GitHub's. A runner here has enrolled with an
 agent; a runner in `runnerly runner list` is registered with GitHub. Usually
 the same machines, but not by definition, and the dashboard does not pretend

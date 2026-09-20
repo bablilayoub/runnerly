@@ -44,6 +44,9 @@ const (
 	EventKilled EventKind = "killed"
 	// EventStopped is emitted once the process is gone.
 	EventStopped EventKind = "stopped"
+	// EventCompleted is emitted when an ephemeral process finished its work,
+	// as distinct from merely exiting.
+	EventCompleted EventKind = "completed"
 )
 
 // Event describes a change in the supervised process.
@@ -127,6 +130,15 @@ type Options struct {
 	// Ephemeral marks a process that is expected to exit cleanly once its work
 	// is done. A clean exit then ends supervision instead of restarting.
 	Ephemeral bool
+	// EphemeralDone decides whether a clean exit really means the work is
+	// finished. Nil treats every clean exit as finished.
+	//
+	// It exists because an exit code is not enough to tell the difference.
+	// Killing the GitHub runner's listener makes its run.sh exit 0, so a
+	// crash and a completed job look identical from here. The caller knows
+	// better — the agent asks the job hooks whether a job actually ran — and
+	// this is how it says so.
+	EphemeralDone func() bool
 	// StopTimeout is how long a graceful stop is given before the process is
 	// killed. Zero uses the package default.
 	StopTimeout time.Duration
@@ -223,9 +235,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			continue
 		}
 
-		if s.opts.Ephemeral && exitErr == nil {
+		if s.opts.Ephemeral && exitErr == nil && s.ephemeralFinished() {
 			// The work is done. This is the whole point of an ephemeral
 			// runner, so it is success, not something to restart.
+			s.emit(Event{Kind: EventCompleted, Uptime: uptime})
 			return nil
 		}
 
@@ -325,6 +338,15 @@ func (s *Supervisor) Restart() bool {
 		s.emit(Event{Kind: EventStopping, PID: proc.PID(), Err: err})
 	}
 	return true
+}
+
+// ephemeralFinished asks the caller whether a clean exit was really the end
+// of the work.
+func (s *Supervisor) ephemeralFinished() bool {
+	if s.opts.EphemeralDone == nil {
+		return true
+	}
+	return s.opts.EphemeralDone()
 }
 
 func (s *Supervisor) setCurrent(proc Process) {

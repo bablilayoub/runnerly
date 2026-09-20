@@ -10,6 +10,9 @@ const (
 	StatusBusy     = "busy"
 	StatusStopping = "stopping"
 	StatusError    = "error"
+	// StatusRetired is reported for a runner that finished on purpose, so
+	// it is not confused with one whose machine stopped answering.
+	StatusRetired = "retired"
 )
 
 // Scope kinds, mirroring github.ScopeKind without importing it: the store
@@ -54,9 +57,16 @@ type Runner struct {
 	MemoryPercent  float64    `json:"memory_percent"`
 	DiskPercent    float64    `json:"disk_percent"`
 	LastHeartbeat  *time.Time `json:"last_heartbeat,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// RetiredAt is set when a runner finished for good, which for an
+	// ephemeral runner means it ran its job and was taken apart.
+	RetiredAt     *time.Time `json:"retired_at,omitempty"`
+	RetiredReason string     `json:"retired_reason,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
+
+// Retired reports whether the runner has finished for good.
+func (r Runner) Retired() bool { return r.RetiredAt != nil }
 
 // Thresholds decide when a runner counts as stale or offline. The project
 // plan requires these to be configurable rather than baked in.
@@ -80,7 +90,7 @@ func DefaultThresholds() Thresholds {
 // that stops sending heartbeats never gets the chance to tell us so. Nothing
 // would update a stored value at the moment it became wrong.
 func (r Runner) Health(now time.Time, t Thresholds) Health {
-	if r.LastHeartbeat == nil {
+	if r.Retired() || r.LastHeartbeat == nil {
 		return HealthOffline
 	}
 	switch age := now.Sub(*r.LastHeartbeat); {
@@ -97,6 +107,12 @@ func (r Runner) Health(now time.Time, t Thresholds) Health {
 // said it. A runner that claims to be online but stopped reporting is
 // offline, whatever the column says.
 func (r Runner) EffectiveStatus(now time.Time, t Thresholds) string {
+	// A retired runner stopped on purpose. Reporting it as offline would
+	// make a fleet of finished ephemeral runners look like a fleet of
+	// broken ones.
+	if r.Retired() {
+		return StatusRetired
+	}
 	if r.Health(now, t) == HealthOffline {
 		return StatusOffline
 	}
