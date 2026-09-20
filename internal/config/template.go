@@ -142,8 +142,10 @@ security:
   # arbitrary workflow code; fork pull requests on a public repository are the
   # single most dangerous configuration.
   #
-  # These are advisory today: Runnerly surfaces the policy, it does not yet
-  # enforce it against GitHub.
+  # allow_public_repositories is enforced: runner create refuses a public
+  # repository unless it is true or --allow-public is passed.
+  # allow_fork_workflows is advisory. Runnerly cannot control which workflows
+  # GitHub dispatches; enforce it in GitHub's own settings.
   allow_public_repositories: %t
   allow_fork_workflows: %t
 `

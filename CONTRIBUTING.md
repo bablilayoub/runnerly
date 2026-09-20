@@ -12,12 +12,12 @@ right now are small and concrete.
 
 ## Setting up
 
-Requires Go 1.25 or newer.
+Requires Go 1.25 or newer, and Node 22 or newer if you touch the dashboard.
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git
 cd runnerly
-make build
+make all      # or `make build` to skip the dashboard
 make check
 ```
 
@@ -38,8 +38,8 @@ boring** over code that is clever or generic.
   to do next. A failing `doctor` check must suggest an action.
 - **Dependencies.** Adding one needs an answer to: why do we need this, why
   can't the standard library do it, is it maintained, is its license
-  compatible? Runnerly currently depends on `cobra` and `yaml.v3`, and that is
-  the bar.
+  compatible? Runnerly depends on `cobra`, `yaml.v3` and `pgx`, and the
+  dashboard on `react`, `react-dom` and `react-router-dom`. That is the bar.
 - **Documentation.** If behavior visible to a user changes, update `docs/` and
   the README in the same pull request.
 - **Scope.** One change per pull request. Unrelated refactors make review

@@ -6,8 +6,11 @@ GitHub keeps doing that.
 
 ## Authenticating
 
-Runnerly uses a personal access token. OAuth device flow needs a registered
-OAuth app, which does not exist yet.
+Runnerly uses a personal access token. The CLI has no OAuth device flow:
+that needs a registered OAuth app, and Runnerly ships none. (The control
+plane's dashboard does sign in with OAuth, using an app you register
+yourself — see [server.md](server.md#dashboard-sign-in). That is a separate
+credential and has nothing to do with the CLI's token.)
 
 ```bash
 echo "$GITHUB_TOKEN" | runnerly login --with-token

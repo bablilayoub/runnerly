@@ -153,7 +153,7 @@ runners:
     scope: {kind: repository, owner: acme, repo: widgets}
     host: github.com
     dir: /home/me/.local/share/runnerly/runners/runnerly-01
-    labels: [self-hosted, linux, x64, docker]
+    labels: [self-hosted, linux, x64, runnerly]
     installed_at: 2026-09-20T03:23:21Z
 ```
 
@@ -205,8 +205,13 @@ sits unresolved, and a command it does not understand comes back as failed
 rather than being ignored.
 
 ## Not implemented
+
 - **Autoscaling.** Nothing provisions machines or decides how many runners
   to run. Ephemeral runners themselves work; see
   [ephemeral-runners.md](ephemeral-runners.md).
-- **Upgrades.** Neither the agent nor the runner updates itself. The command
-  channel could carry it; nothing implements it yet.
+- **Unattended upgrades.** `runnerly upgrade --runners` brings this machine's
+  runners up to the release GitHub expects, but only when you run it. Nothing
+  upgrades on a schedule, and no command over the heartbeat carries one — an
+  upgrade restarts a runner, and restarting one mid-job throws that job away.
+- **Self-upgrade.** The Runnerly binary does not replace itself. `upgrade`
+  reports when it is behind and leaves the swap to you.

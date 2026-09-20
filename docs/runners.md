@@ -160,9 +160,19 @@ runnerly ephemeral run --repo acme/widgets
 
 See [ephemeral-runners.md](ephemeral-runners.md).
 
+## Upgrading a runner
+
+```bash
+runnerly upgrade                 # what is out of date
+runnerly upgrade --runners       # bring this machine's runners up to date
+```
+
+An upgrade restarts a runner, and restarting one mid-job throws that job
+away, so it is asked for rather than scheduled. Nothing upgrades unattended,
+and the Runnerly binary does not replace itself.
+
 ## What is not implemented
 
-- upgrades of the runner or of Runnerly itself
 - autoscaling: nothing provisions machines or decides how many to run
 
 Starting, supervising and restarting are the agent's job; see

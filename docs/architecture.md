@@ -29,7 +29,7 @@ and manages its lifecycle.
 
 | Component | Binary | State |
 | --- | --- | --- |
-| CLI | `runnerly` | doctor, config, auth, repo, runner and agent commands |
+| CLI | `runnerly` | doctor, config, auth, repo, runner, agent, ephemeral, upgrade, server |
 | Runner agent | `runnerly-agent` | supervision, restart backoff, systemd |
 | Control plane | `runnerly-server` | enrollment, heartbeats, events, API |
 | Dashboard | embedded in `runnerly-server` | overview, runners, events, restart, remove |
@@ -211,24 +211,36 @@ says so plainly rather than pretending otherwise.
 
 ## Why the GitHub client is hand-written
 
-Two direct dependencies is the bar (see below), and Runnerly uses six GitHub
-endpoints. A full client library would add a large dependency to save a few
+Three direct dependencies is the bar (see below), and Runnerly uses six
+GitHub endpoints. A full client library would add a large dependency to save a few
 hundred lines, and would hand back GitHub's own error messages — which are
 rarely actionable. A 404 from a runner endpoint almost always means "your token
 cannot see this", and saying that is worth more than forwarding "Not Found".
 
-## Planned
+## Not built
 
-Roughly in order:
+**Unattended upgrades.** `runnerly upgrade` reports what is out of date and,
+with `--runners`, applies it. What is missing is doing that without being
+asked. The command channel could carry it, and the reason it does not is not
+plumbing: an upgrade restarts a runner, restarting one mid-job throws that
+job away, and nothing here knows when a machine is safe to interrupt. That
+needs a maintenance window as a first-class idea, not a flag.
 
-1. **Docker executor**, then **ephemeral runners**.
-2. **Upgrades** — the command channel now exists to carry them; what is
-   missing is deciding and testing what an unattended runner upgrade should
-   actually do.
+**Self-replacing binary.** `upgrade` says when Runnerly itself is behind and
+stops there. There are no published releases to test a swap against, and a
+binary that rewrites itself badly is worse than one that does not try.
 
-Deliberately out of scope until the above is solid: Kubernetes, autoscaling,
-cloud provisioning, GPU scheduling, Windows and macOS runners, and local
-workflow execution.
+**VM-per-job isolation.** The honest answer when a job needs a real boundary,
+and the one thing an ephemeral runner does not give you. See
+[security.md](security.md).
+
+Deliberately out of scope: Kubernetes, autoscaling, cloud provisioning, GPU
+scheduling, multi-tenancy and local workflow execution.
+
+Windows runners are out of scope for a concrete reason: the job hooks are
+shell scripts, so cleanup between jobs and `busy` reporting would not work.
+macOS is different — runners do register and run jobs there; what is missing
+is service integration, since the unit `agent systemd` generates is systemd.
 
 ## Dependency policy
 

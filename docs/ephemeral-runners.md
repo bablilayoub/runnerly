@@ -140,7 +140,8 @@ executor:
 ## What is not here
 
 - **Autoscaling.** Nothing provisions machines or decides how many runners to
-  have. See the plan's roadmap.
+  have. A `Restart=always` unit keeps one fresh runner on a machine you
+  already have; deciding how many machines to have is a different problem.
 - **A pool on one machine.** One `ephemeral run` supervises one runner. Run
   several units with different name prefixes and directories if you want more.
 - **VM-per-job isolation.** Still the honest answer to "I need a real

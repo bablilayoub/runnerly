@@ -1,6 +1,6 @@
 # Getting started
 
-Runnerly is in early development. This page covers what works today.
+The shortest path from a bare machine to a runner picking up jobs.
 
 ## What Runnerly does
 
@@ -12,21 +12,25 @@ unit, and then noticing three weeks later that it went offline.
 Runnerly is the layer around that: it installs, registers, monitors and
 retires runners so you do not do those steps by hand.
 
-## What works today
+## The commands
 
-- `runnerly doctor` — tells you whether a machine can host a runner
-- `runnerly login` — stores a GitHub token
-- `runnerly repo list` — finds repositories you can attach a runner to
-- `runnerly runner create` — installs and registers a real runner
-- `runnerly runner list` / `status` / `remove` — manages registrations
-- `runnerly agent run` — supervises the runner and restarts it when it fails
-- `runnerly agent systemd` — prints a service unit for running it at boot
-- `runnerly config` — creates and inspects the configuration file
-- `runnerly version` — build information
+| Command | What it does |
+| --- | --- |
+| `runnerly doctor` | says whether a machine can host a runner |
+| `runnerly login` / `logout` / `auth status` | the GitHub token |
+| `runnerly repo list` | repositories you can attach a runner to |
+| `runnerly runner create` | installs and registers a real runner |
+| `runnerly runner list` / `status` / `remove` | the registrations in GitHub |
+| `runnerly agent run` | supervises the runner and restarts it when it fails |
+| `runnerly agent systemd` / `status` | a service unit; what is installed here |
+| `runnerly ephemeral run` | register, one job, clean up, destroy |
+| `runnerly upgrade` | what is out of date, and `--runners` to fix it |
+| `runnerly server` | the control plane, its tokens and its keys |
+| `runnerly config` | creates and inspects the configuration file |
+| `runnerly version` | build information |
 
-Runnerly does not yet talk to a control plane; there is no server to enroll
-with. The agent reports through structured logs. See
-[architecture.md](architecture.md) for the plan.
+Everything up to `agent run` works on one machine with no server. A control
+plane is optional and covered at the end.
 
 ## Install
 
@@ -36,9 +40,12 @@ build from source:
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git
 cd runnerly
-make build
-sudo make install     # optional: puts runnerly in /usr/local/bin
+make all              # the dashboard, then the binaries
+sudo make install     # optional: puts them in /usr/local/bin
 ```
+
+`make build` on its own skips the dashboard and needs no Node. The CLI and
+the agent do not use it either way.
 
 ## Check a machine
 
@@ -73,9 +80,9 @@ provisioning step:
 runnerly doctor --json > /var/log/runnerly-doctor.json || exit 1
 ```
 
-Warnings do not fail the run. Running on macOS, for example, warns that
-Runnerly only manages Linux runners but still exits `0` so you can develop
-against the CLI.
+Warnings do not fail the run. On macOS, for example, `doctor` warns that
+`agent systemd` generates a unit macOS does not use — runners themselves work
+there — and still exits `0`.
 
 ## Create a configuration
 
@@ -148,20 +155,50 @@ jobs:
 Runnerly refuses to register against a public repository by default. Read
 [security.md](security.md) before overriding that.
 
+## A clean machine for every job
+
+A long-lived runner accumulates whatever its jobs leave behind. An ephemeral
+one takes a single job and is then taken apart:
+
+```bash
+runnerly ephemeral run --repo owner/repo
+```
+
+Under a `Restart=always` unit, that gives the machine a fresh runner for
+every job. See [ephemeral-runners.md](ephemeral-runners.md).
+
 ## Several machines
 
 Once more than one machine runs a runner, an optional control plane answers
 "what is out there and is it healthy?", with a dashboard to look at it.
-Nothing above requires it. See [server.md](server.md) and
-[dashboard.md](dashboard.md).
+Nothing above requires it.
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml up -d
+runnerly server enrollment-token create --max-uses 1
+```
+
+Then on each runner machine, before `agent run`:
+
+```bash
+export RUNNERLY_SERVER_URL=https://runnerly.example.com
+export RUNNERLY_ENROLLMENT_TOKEN=rnr_enroll_...
+```
+
+The agent trades that one-shot token for a machine token of its own. See
+[server.md](server.md) and [dashboard.md](dashboard.md).
 
 ## Next
 
+- [Installation](installation.md) — platforms, cross-compiling, uninstalling
 - [GitHub integration](github.md)
 - [Runners](runners.md)
 - [The agent](agent.md)
+- [The Docker executor](docker.md)
+- [Ephemeral runners](ephemeral-runners.md)
 - [The control plane](server.md)
 - [The dashboard](dashboard.md)
+- [Running in production](operations.md) — TLS, metrics, backups, upgrades
 - [Configuration](configuration.md)
 - [Security model](security.md) — read this before pointing a runner at a public repository
 - [Troubleshooting](troubleshooting.md)

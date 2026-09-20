@@ -62,7 +62,8 @@ Rootless Docker is a real improvement; point `executor.docker.host` at it.
 See [docker.md](docker.md).
 
 If you need a real boundary, use a disposable VM per job. VM-backed isolation
-is on the roadmap and is not implemented.
+is not built, and an ephemeral runner is not a substitute: it gives every job
+a clean environment, not a boundary around it.
 
 ### 4. Keep unrelated credentials off runner machines
 
@@ -89,7 +90,17 @@ A runner that handles one job and is then destroyed gives every job a clean
 environment and limits what a compromised job can leave behind for the next
 one. GitHub recommends ephemeral runners for autoscaling.
 
-Ephemeral support is planned and not implemented.
+```bash
+runnerly ephemeral run --repo acme/widgets
+```
+
+Each run gets its own registration and its own working directory, and the
+directory is deleted afterwards. The logs are kept outside it, so what a run
+did survives the runner being taken apart. See
+[ephemeral-runners.md](ephemeral-runners.md).
+
+What this does not give you is isolation from the host — see rule 3. A clean
+environment per job and a boundary around the job are different things.
 
 ## Where your GitHub token is kept
 
@@ -112,8 +123,12 @@ An environment token always beats the stored one and is never written.
 `runnerly auth status` always says which source is in use, so this is never a
 surprise.
 
-Server-side storage is a different problem with a different answer: the control
-plane will encrypt credentials at rest, because it has somewhere to put a key.
+Server-side storage is a different problem with a different answer, and the
+control plane does encrypt at rest, because it has somewhere to put a key.
+A signed-in user's GitHub token is encrypted with AES-256-GCM under
+`server.secret_key`; enrollment tokens, machine tokens and session cookies are
+hashed instead, since the server only ever has to recognize one. The key is not
+in the database, so a dump alone yields nothing. See [operations.md](operations.md).
 
 Prefer a token scoped to exactly what you need — see [github.md](github.md) —
 and note that a runner machine does not need your token at all. Registration
@@ -125,8 +140,10 @@ happens with a short-lived registration token that Runnerly requests, passes to
 These are commitments about Runnerly's own behavior.
 
 - **No long-lived GitHub credentials on runner machines.** Registration uses
-  GitHub's short-lived registration tokens. Where an operation can be mediated
-  by the control plane instead of handing a credential to an agent, it will be.
+  GitHub's short-lived registration tokens. An enrolled agent holds a machine
+  token for Runnerly's own API and no GitHub credential at all; the server
+  rotates that token on a schedule, so a leaked one is worth something for a
+  bounded time.
 - **Downloads are verified.** The official runner archive is checked against the
   SHA-256 checksum GitHub publishes with it. A mismatch deletes the file rather
   than executing it, and a release GitHub publishes no checksum for is refused.
@@ -139,10 +156,11 @@ These are commitments about Runnerly's own behavior.
 - **No silent privileged operations.** When something needs root, Runnerly
   says why before doing it.
 - **The agent runs as a dedicated non-root user** wherever the execution mode
-  allows it.
-
-Some of these describe components that do not exist yet. They are stated here
-so the design is fixed before the code is written, not after.
+  allows it. The unit `agent systemd` prints does this; it does not install
+  itself, so you read it before root touches anything.
+- **Credentials the server keeps are hashed unless it must read them back**,
+  and encrypted when it must. Which is which is in
+  [architecture.md](architecture.md).
 
 ## In production
 

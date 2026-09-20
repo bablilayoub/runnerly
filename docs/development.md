@@ -10,11 +10,14 @@
 ## Everyday commands
 
 ```bash
-make build      # binary into dist/
+make all        # the dashboard, then the three binaries into dist/
+make build      # the binaries alone; no Node needed
 make test       # unit tests
 make check      # everything CI runs: fmt-check, vet, lint, test
 make run ARGS="doctor --offline"
 ```
+
+`make help` lists every target.
 
 `make check` is the gate. If it passes locally, CI should pass.
 
@@ -212,12 +215,32 @@ An unstamped build reports `dev`.
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request:
 
-- **test** on Go 1.25 and current stable: formatting, `go mod tidy` cleanliness,
-  `go vet`, and the tests with `-race`
+- **dashboard**: typecheck, lint, format check and build, uploading the built
+  assets as an artifact the other jobs download
+- **test** on Go 1.25 and current stable: formatting, `go mod tidy`
+  cleanliness, `go vet`, and the tests with `-race`, against a real
+  PostgreSQL service container
 - **lint**: `golangci-lint` at the pinned version
 - **build**: linux/amd64, linux/arm64 and darwin/arm64, uploading each binary
 
+Three of those steps exist because something got past the others:
+
+- **"Check the dashboard build left the repository clean"** — Vite's
+  `emptyOutDir` once deleted the `.gitkeep` that keeps `internal/web/dist`
+  in git, so `//go:embed` failed on a clean checkout while every local build
+  passed.
+- **"Check the dashboard tests actually ran"** and **"Check the database
+  tests actually ran"** — both suites skip when their dependency is absent,
+  which is right locally and useless in CI. A skipped suite is a green build
+  that tested nothing, so CI fails if they skip.
+- **"Check the dashboard made it into the binary"** — a release build that
+  silently shipped the placeholder page would look fine until someone opened
+  it.
+
 ## Dependencies
 
-Two direct dependencies: `spf13/cobra` and `gopkg.in/yaml.v3`. Adding a third
-needs a justification in the pull request — see [CONTRIBUTING.md](../CONTRIBUTING.md).
+Three direct Go dependencies: `spf13/cobra`, `gopkg.in/yaml.v3` and
+`jackc/pgx/v5`. The dashboard has three: `react`, `react-dom` and
+`react-router-dom`. Adding a fourth to either needs a justification in the
+pull request — see [CONTRIBUTING.md](../CONTRIBUTING.md) and the reasoning in
+[architecture.md](architecture.md#dependency-policy).

@@ -46,7 +46,7 @@ runnerly agent run
 ✓ runnerly-01 is registered with owner/repo
 
   scope    owner/repo
-  labels   self-hosted,linux,x64
+  labels   self-hosted,linux,x64,runnerly
   runner   actions-runner-linux-x64-2.330.0.tar.gz
   dir      /home/me/.local/share/runnerly/runners/runnerly-01
 ```
@@ -54,7 +54,8 @@ runnerly agent run
 The archive is verified against the SHA-256 checksum GitHub publishes with it
 before anything is unpacked or executed.
 
-Workflows reach the runner the usual way — the labels are GitHub's own, and
+Workflows reach the runner the usual way. The platform labels are GitHub's
+own; `runnerly` is a marker so Runnerly-managed runners are identifiable, and
 `--labels` adds your own on top:
 
 ```yaml

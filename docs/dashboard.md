@@ -116,7 +116,10 @@ Set `RUNNERLY_SERVER_URL` if the server is not on `127.0.0.1:8080`.
   it. The dashboard covers machines.
 - **Log streaming.** The event feed is not a log viewer, and the agent's logs
   stay on the machine.
-- **Upgrades.** `POST /runners/{id}/upgrade` is in the plan; the command
-  channel now exists to carry it, but nothing implements it yet.
+- **Remote upgrades.** `runnerly upgrade --runners` works on the machine
+  itself; asking for one from here does not. The command channel could carry
+  it, and the missing part is not plumbing — an upgrade restarts a runner,
+  and nothing here knows when a machine is safe to interrupt. See
+  [operations.md](operations.md#upgrades).
 - **Access control beyond the allow list.** Everyone who can sign in sees
   everything.
