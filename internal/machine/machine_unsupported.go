@@ -4,14 +4,13 @@ package machine
 
 import "context"
 
-// Memory and processor readings have a source on Linux and macOS and
-// nowhere else Runnerly builds for. Windows is not a supported runner
-// platform at all, and the other unixes have sources that nobody has run
-// this against — a number arrived at by reading documentation is exactly
-// the kind that turns out to mean something else.
+// MemoryTotal reports unknown, because memory has a source on Linux and
+// macOS and nowhere else Runnerly builds for. The other unixes have
+// sources nobody has run this against, and a number arrived at by reading
+// documentation is exactly the kind that turns out to mean something else.
 //
-// Zero and false mean unknown, and every surface renders that as a dash.
-
+// Zero and false mean unknown here, and every surface renders that as a
+// dash rather than as a machine with no memory.
 func MemoryTotal() int64 { return 0 }
 
 func memoryUsedPercent(context.Context) (float64, bool) { return 0, false }

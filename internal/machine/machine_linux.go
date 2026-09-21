@@ -120,8 +120,11 @@ func cgroupMemoryUsage() (used, total int64, ok bool) {
 }
 
 // cgroupValue reads a file holding a single number. "max" is not a number.
+//
+// Every caller passes cgroupRoot plus a literal name, so there is no input
+// here to smuggle a path through.
 func cgroupValue(path string) (int64, bool) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: a constant path, see above
 	if err != nil {
 		return 0, false
 	}

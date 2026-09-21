@@ -143,6 +143,30 @@ vet: ## Run go vet
 lint: ## Run golangci-lint (fetches the pinned version on first use)
 	$(GOLANGCI_LINT) run
 
+# Build tags hide code from the linter: running it here only ever checks the
+# files that build for this machine. A gosec finding in a linux-only file
+# sailed past a clean local run and failed CI, so every platform Runnerly
+# compiles for gets a pass of its own.
+#
+# The linter is built once, natively, because GOOS applies to what `go run`
+# compiles as well as to what the tool then analyses: setting it on `go run`
+# produces a linter for the target platform, which this machine cannot
+# execute.
+LINT_PLATFORMS ?= linux/amd64 linux/arm64 darwin/arm64 windows/amd64
+GOLANGCI_LINT_BIN := $(DIST)/golangci-lint
+
+$(GOLANGCI_LINT_BIN):
+	@mkdir -p $(DIST)
+	GOOS= GOARCH= GOBIN=$(abspath $(DIST)) \
+		$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+.PHONY: lint-platforms
+lint-platforms: $(GOLANGCI_LINT_BIN) ## Run golangci-lint once per supported platform
+	@for target in $(LINT_PLATFORMS); do \
+		echo "==> golangci-lint $$target"; \
+		GOOS=$${target%/*} GOARCH=$${target#*/} $(GOLANGCI_LINT_BIN) run || exit 1; \
+	done
+
 .PHONY: tidy
 tidy: ## Tidy go.mod and go.sum
 	$(GO) mod tidy
@@ -158,7 +182,7 @@ lint-sh: ## Check install.sh with shellcheck, when it is installed
 		|| { echo "shellcheck is not installed; checking syntax only."; sh -n install.sh; }
 
 .PHONY: check
-check: fmt-check vet lint lint-sh lint-actions test ## Everything CI runs
+check: fmt-check vet lint-platforms lint-sh lint-actions test ## Everything CI runs
 
 .PHONY: clean
 clean: web-clean site-clean ## Remove build artifacts

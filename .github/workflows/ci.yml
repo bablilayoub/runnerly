@@ -267,8 +267,13 @@ jobs:
           cache: true
 
       # The version is pinned in the Makefile so local and CI runs agree.
+      #
+      # Once per platform, because build tags hide files from the linter:
+      # a run on this machine only checks what builds for this machine, and
+      # a gosec finding in a linux-only file passed a clean macOS run and
+      # then failed here.
       - name: golangci-lint
-        run: make lint
+        run: make lint-platforms
 
       # The workflows are code too, and a typo in one is only discovered by
       # pushing. actionlint also runs shellcheck over every `run:` block.
