@@ -146,6 +146,12 @@ sudo systemctl enable --now runnerly-agent@runnerly-01
 journalctl -u runnerly-agent@runnerly-01 -f
 ```
 
+On other platforms the same command has a different name, because the
+service manager does: `agent launchd` on macOS and `agent schtasks` on
+Windows. Each prints the thing that platform actually uses, installs
+nothing, and shows the commands. See [macos.md](macos.md) and
+[windows.md](windows.md).
+
 The unit runs as a dedicated `runnerly` user, never root. Change it with
 `--user` and `--group`. A reference copy lives in
 [`deploy/systemd/runnerly-agent.service`](../deploy/systemd/runnerly-agent.service).

@@ -23,7 +23,7 @@ retires runners so you do not do those steps by hand.
 | `runnerly runner create` | installs and registers a real runner |
 | `runnerly runner list` / `status` / `remove` | the registrations in GitHub |
 | `runnerly agent run` | supervises the runner and restarts it when it fails |
-| `runnerly agent systemd` / `status` | a service unit; what is installed here |
+| `runnerly agent systemd` / `launchd` / `status` | a service file for this platform; what is installed here |
 | `runnerly ephemeral run` | register, one job, clean up, destroy |
 | `runnerly upgrade` | what is out of date, and `--runners` to fix it |
 | `runnerly server` | the control plane, its tokens and its keys |
@@ -161,13 +161,15 @@ The agent starts the runner and restarts it if it fails, backing off 5s, 10s,
 20s, 40s, 80s. Ctrl-C stops both cleanly, giving the runner a chance to finish
 the job it is on.
 
-To run it at boot, generate a systemd unit and install it yourself:
+To run it at boot, generate a service file and install it yourself:
 
 ```bash
-runnerly agent systemd --output runnerly-agent.service
+runnerly agent systemd --output runnerly-agent.service    # Linux
+runnerly agent launchd --output runnerly-agent.plist      # macOS
 ```
 
-See [agent.md](agent.md) for the install commands and what the unit does.
+See [agent.md](agent.md) for the install commands and what the unit does,
+and [macos.md](macos.md) for what a Mac does differently.
 
 Push a workflow that targets it:
 

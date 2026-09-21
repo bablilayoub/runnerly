@@ -144,6 +144,7 @@ agent: two layers, each covering the other's failure.
 ```bash
 runnerly agent run        # foreground
 runnerly agent systemd    # print a unit; installs nothing itself
+runnerly agent launchd    # the same thing on macOS, for launchd
 ```
 
 **Cleans up after jobs.** With the Docker executor, Runnerly removes the
