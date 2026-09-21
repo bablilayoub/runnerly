@@ -23,19 +23,23 @@ not cross-compiled and assumed.
 - **Stopping a runner gracefully.** There are no signals, so the agent
   sends `CTRL_BREAK_EVENT` to the runner's process group. CI checks that
   the event reaches the runner and does not reach the agent.
-- **Reading a secret without echoing it**, through the console API rather
-  than `stty`.
 - **A scheduled task.** `runnerly agent schtasks` prints one; CI imports
   it into the real Task Scheduler, which is the only thing that can say
   whether the document is valid.
+
+One thing is implemented and **not** in that list: reading a secret
+without echoing it, through the console API rather than `stty`. Turning
+echo off needs a real console and CI has none, so it is written and
+compiled and nobody has watched it work.
 
 ## What does not
 
 - **Nobody has watched a Windows runner take a real job.** That is the
   one that matters, and until it happens the rest is parts rather than a
   product.
-- **There is no installer.** `install.sh` is a POSIX shell script. Build
-  from source, or take the binaries from a release.
+- **There is no installer, and no published binaries.** `install.sh` is a
+  POSIX shell script, and the release workflow builds Linux and macOS
+  only. Build from source: `go build ./cmd/...`.
 - **The Docker executor is untried here.** It shells out to `docker`, so
   it may well work; nobody has run it.
 - **A credentials file is protected by its ACL, not its mode.** Runnerly
