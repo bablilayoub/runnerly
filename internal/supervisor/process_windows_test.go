@@ -133,3 +133,58 @@ func waitForFile(t *testing.T, path, why string) {
 	}
 	t.Fatalf("timed out waiting for %s", why)
 }
+
+// TestStartExecCanStartABatchFile checks the thing the whole Windows
+// runner rests on: GitHub ships run.cmd, Preflight picks it, and the
+// supervisor hands it to StartExec.
+//
+// CreateProcess cannot execute a batch file — it is not an executable
+// image — so whether this works at all depends on os/exec doing
+// something about that. Guessing either way would be guessing about the
+// one call that has to succeed before a Windows runner can run anything.
+func TestStartExecCanStartABatchFile(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran.txt")
+
+	script := filepath.Join(dir, "run.cmd")
+	body := "@echo off\r\necho started>\"" + marker + "\"\r\nexit /b 0\r\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	proc, err := StartExec(ProcessOptions{Dir: dir, Command: script})
+	if err != nil {
+		t.Fatalf("StartExec on a .cmd: %v\n"+
+			"GitHub's Windows runner is run.cmd, so this is the call a Windows "+
+			"runner cannot start without", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("waiting for the batch file: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the batch file did not run: %v", err)
+	}
+}
+
+// And the same through a relative path, which is how Preflight names it:
+// the runner expects to be invoked from its own directory.
+func TestStartExecCanStartABatchFileByRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran.txt")
+
+	body := "@echo off\r\necho started>\"" + marker + "\"\r\nexit /b 0\r\n"
+	if err := os.WriteFile(filepath.Join(dir, "run.cmd"), []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	proc, err := StartExec(ProcessOptions{Dir: dir, Command: `.\run.cmd`})
+	if err != nil {
+		t.Fatalf("StartExec on .\\run.cmd: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("waiting for the batch file: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the batch file did not run: %v", err)
+	}
+}
