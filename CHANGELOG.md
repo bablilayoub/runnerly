@@ -6,6 +6,22 @@ land.
 
 ## Unreleased
 
+## 0.1.1
+
+### Fixed
+
+- `runnerly setup` refused to continue on an account with more than thirty
+  administrable repositories, telling you to pass `--repo` instead. The cap
+  was a refusal rather than a page size, and it was the first thing anyone
+  with a lot of repositories hit. The picker now shows the twenty most
+  recently pushed, says how many more there are, and takes a number, a
+  search to narrow the list, or a full `owner/repo` typed straight in. A
+  number outside the list is re-asked rather than ending the command.
+- Two prompts in `setup` each built their own buffered reader over the same
+  standard input, so one question could swallow the answer to the next.
+  Only reachable once the wizard asked more than once, which the repository
+  search made it do.
+
 ## 0.1.0
 
 The first release. Everything below is new, so the list is what Runnerly
