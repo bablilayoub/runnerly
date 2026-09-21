@@ -250,10 +250,23 @@ Three direct Go dependencies: `spf13/cobra` for the command tree,
 color, terminal detection, HTTP routing, migrations, UUIDs and cryptography
 are handled with the standard library.
 
-The dashboard has three: `react`, `react-dom` and `react-router-dom`. Styling
-is Tailwind with no component library: a monochrome interface of tables,
-badges and two dialogs does not need headless primitives, and the one dialog
-that needs focus trapping uses the browser's own `<dialog>`.
+The dashboard's runtime dependencies are React, `react-router-dom`, Radix
+primitives, `sonner`, `lucide-react`, `class-variance-authority`, `cn` and
+the two Geist fonts. Styling is Tailwind.
+
+The interface is built with [shadcn/ui](https://ui.shadcn.com), which is not
+a component library in the usual sense: its CLI copies component source into
+`web/src/components/ui/`, where it is ours to read and fix. What that pulls
+in as an actual dependency is Radix — the behaviour under a dropdown, a
+confirmation dialog or a toggle group. That behaviour is focus management,
+`aria-*` wiring, Escape and click-outside, arrow-key roving and returning
+focus afterwards, and it is worth more than the bytes: every one of those is
+something a hand-rolled version gets subtly wrong and nobody notices until
+someone navigates by keyboard.
+
+The dashboard did without it at first, on the argument that tables, badges
+and two dialogs do not need headless primitives. That was true of what was
+on the page then.
 
 `pgx` was added because speaking the PostgreSQL wire protocol is not something
 to hand-write. Migrations were not: a forward-only runner over embedded SQL is

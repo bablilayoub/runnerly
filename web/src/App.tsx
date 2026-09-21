@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { ApiError, api } from './api'
-import { Layout } from './components/Layout'
-import { Failure, Spinner } from './components/primitives'
-import { Events } from './pages/Events'
-import { Login } from './pages/Login'
-import { Overview } from './pages/Overview'
-import { RunnerDetail } from './pages/RunnerDetail'
-import { Runners } from './pages/Runners'
-import { Settings } from './pages/Settings'
-import type { User } from './types'
+import { ApiError, api } from '@/api'
+import { Layout } from '@/components/Layout'
+import { Failure, PageLoading } from '@/components/states'
+import { Events } from '@/pages/Events'
+import { Login } from '@/pages/Login'
+import { Overview } from '@/pages/Overview'
+import { RunnerDetail } from '@/pages/RunnerDetail'
+import { Runners } from '@/pages/Runners'
+import { Settings } from '@/pages/Settings'
+import type { User } from '@/types'
 
 type Auth =
   | { state: 'loading' }
@@ -60,7 +60,13 @@ export function App() {
     }
   }, [])
 
-  if (auth.state === 'loading') return <Spinner label="Checking your session" />
+  if (auth.state === 'loading') {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <PageLoading />
+      </div>
+    )
+  }
 
   if (auth.state === 'broken') {
     return (

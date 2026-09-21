@@ -22,4 +22,15 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    // shadcn components are vendored, not written here: they are copied in
+    // by the CLI and replaced by it on an update. Several export a cva
+    // variant map next to the component, which the fast-refresh rule
+    // objects to. Editing them to satisfy a lint rule means re-editing
+    // them every time they are pulled again.
+    files: ['src/components/ui/**'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 )

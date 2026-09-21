@@ -1,9 +1,22 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../api'
-import { useLoad, useNow } from '../hooks'
-import { duration, orDash, relativeTime } from '../format'
-import { Card, Empty, Failure, Label, Spinner, Status } from '../components/primitives'
-import { Cell, Row, Table } from '../components/Table'
+
+import { MiniLoad } from '@/components/LoadMeter'
+import { Panel } from '@/components/Panel'
+import { Failure, Loading, Nothing } from '@/components/states'
+import { LabelTag, Status } from '@/components/status'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { api } from '@/api'
+import { duration, orDash, relativeTime } from '@/format'
+import { useLoad, useNow } from '@/hooks'
 
 const POLL_MS = 5000
 
@@ -18,33 +31,35 @@ export function Runners() {
   const navigate = useNavigate()
   const now = useNow() // keep the heartbeat ages moving between polls
 
-  if (initial) return <Spinner />
   if (error) return <Failure error={error} />
 
   const runners = data?.runners ?? []
 
   return (
-    <Card title={`Runners (${runners.length})`}>
-      <div className="flex justify-end px-4 pt-3">
-        <label
-          className="flex cursor-pointer items-center gap-2 text-xs"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          <input
-            type="checkbox"
+    <Panel
+      title={initial ? 'Runners' : `Runners (${runners.length})`}
+      action={
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="include-retired"
             checked={includeRetired}
-            onChange={(e) => {
+            onCheckedChange={(checked) => {
               const next = new URLSearchParams(params)
-              if (e.target.checked) next.set('retired', 'true')
+              if (checked === true) next.set('retired', 'true')
               else next.delete('retired')
               setParams(next, { replace: true })
             }}
           />
-          Include retired
-        </label>
-      </div>
-      {runners.length === 0 ? (
-        <Empty
+          <Label htmlFor="include-retired" className="text-xs font-normal text-muted-foreground">
+            Include retired
+          </Label>
+        </div>
+      }
+    >
+      {initial ? (
+        <Loading rows={5} />
+      ) : runners.length === 0 ? (
+        <Nothing
           title={includeRetired ? 'No runners at all' : 'No runners in service'}
           hint={
             includeRetired
@@ -53,49 +68,74 @@ export function Runners() {
           }
         />
       ) : (
-        <Table head={['Name', 'Status', 'Scope', 'Platform', 'Labels', 'Heartbeat']}>
-          {runners.map((runner) => (
-            <Row key={runner.id} onClick={() => navigate(`/runners/${runner.id}`)}>
-              <Cell>
-                <span className="font-medium whitespace-nowrap">{runner.name}</span>
-                {runner.ephemeral && (
-                  <span className="ml-2 text-xs" style={{ color: 'var(--text-faint)' }}>
-                    ephemeral
-                  </span>
-                )}
-              </Cell>
-              <Cell>
-                <Status status={runner.status} health={runner.health} />
-              </Cell>
-              <Cell mono muted>
-                {runner.github_scope_id}
-              </Cell>
-              <Cell muted>
-                {orDash(runner.os)}/{orDash(runner.architecture)}
-              </Cell>
-              <Cell>
-                <span className="flex flex-wrap gap-1">
-                  {runner.labels.slice(0, 4).map((label) => (
-                    <Label key={label}>{label}</Label>
-                  ))}
-                  {runner.labels.length > 4 && (
-                    <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
-                      +{runner.labels.length - 4}
-                    </span>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Scope</TableHead>
+              <TableHead>Platform</TableHead>
+              <TableHead>Load</TableHead>
+              <TableHead>Labels</TableHead>
+              <TableHead>Heartbeat</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {runners.map((runner) => (
+              <TableRow
+                key={runner.id}
+                onClick={() => navigate(`/runners/${runner.id}`)}
+                className="cursor-pointer"
+              >
+                <TableCell>
+                  <span className="font-medium whitespace-nowrap">{runner.name}</span>
+                  {runner.ephemeral && (
+                    <span className="ml-2 text-xs text-muted-foreground">ephemeral</span>
                   )}
-                </span>
-              </Cell>
-              <Cell muted>
-                {runner.retired_at
-                  ? `retired ${relativeTime(runner.retired_at, now)}`
-                  : runner.last_heartbeat_age_seconds === null
-                    ? 'never'
-                    : `${duration(runner.last_heartbeat_age_seconds)} ago`}
-              </Cell>
-            </Row>
-          ))}
+                </TableCell>
+                <TableCell>
+                  <Status status={runner.status} health={runner.health} />
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {runner.github_scope_id}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {orDash(runner.os)}/{orDash(runner.architecture)}
+                </TableCell>
+                <TableCell>
+                  <MiniLoad
+                    cpu={runner.cpu_percent}
+                    memory={runner.memory_percent}
+                    disk={runner.disk_percent}
+                  />
+                </TableCell>
+                <TableCell>
+                  {/* One line, always. Wrapping these turned every row into
+                      four, and a list whose rows are four lines tall stops
+                      being a list you can scan. */}
+                  <span className="flex items-center gap-1 whitespace-nowrap">
+                    {runner.labels.slice(0, 3).map((label) => (
+                      <LabelTag key={label}>{label}</LabelTag>
+                    ))}
+                    {runner.labels.length > 3 && (
+                      <span className="text-xs text-muted-foreground">
+                        +{runner.labels.length - 3}
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {runner.retired_at
+                    ? `retired ${relativeTime(runner.retired_at, now)}`
+                    : runner.last_heartbeat_age_seconds === null
+                      ? 'never'
+                      : `${duration(runner.last_heartbeat_age_seconds)} ago`}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
         </Table>
       )}
-    </Card>
+    </Panel>
   )
 }

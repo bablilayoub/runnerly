@@ -4,8 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <!-- Relative on purpose: the artwork lives once in assets/ at the
+         repository root, and Vite bundles and hashes it from there. -->
+    <link rel="icon" type="image/png" href="../assets/runnerly-icon.png" />
+    <link rel="apple-touch-icon" href="../assets/runnerly-icon.png" />
     <title>Runnerly</title>
     <meta name="description" content="Run GitHub Actions on your own infrastructure." />
+    <!--
+      Applied before the stylesheet paints, so a reader who chose dark does
+      not get a white page first. Small enough to inline; a module import
+      would be a round trip, and the flash lasts exactly that long.
+    -->
+    <script>
+      try {
+        var stored = localStorage.getItem('runnerly.theme')
+        var dark =
+          stored === 'dark' ||
+          ((!stored || stored === 'system') &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      } catch (e) {
+        // Storage refused. Follow the system on the next line instead.
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.classList.add('dark')
+        }
+      }
+    </script>
   </head>
   <body class="h-full">
     <div id="root" class="h-full"></div>

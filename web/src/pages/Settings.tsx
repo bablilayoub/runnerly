@@ -1,11 +1,24 @@
 import { useState } from 'react'
-import { api } from '../api'
-import { useLoad, useNow } from '../hooks'
-import { orDash, relativeTime } from '../format'
-import { Button, Card, Empty, Failure, Spinner } from '../components/primitives'
-import { Cell, Row, Table } from '../components/Table'
-import { Confirm } from '../components/Confirm'
-import type { EnrollmentToken, User } from '../types'
+import { KeyRoundIcon, PlusIcon } from 'lucide-react'
+import { toast } from 'sonner'
+
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { CopyButton } from '@/components/CopyButton'
+import { Panel } from '@/components/Panel'
+import { Failure, Loading, Nothing } from '@/components/states'
+import { Button } from '@/components/ui/button'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { api } from '@/api'
+import { orDash, relativeTime } from '@/format'
+import { useLoad, useNow } from '@/hooks'
+import type { EnrollmentToken, User } from '@/types'
 
 export function Settings({ user }: { user: User }) {
   const tokens = useLoad(() => api.enrollmentTokens())
@@ -13,11 +26,9 @@ export function Settings({ user }: { user: User }) {
   const now = useNow()
 
   const [secret, setSecret] = useState<string>()
-  const [actionError, setActionError] = useState<Error>()
   const [revoking, setRevoking] = useState<EnrollmentToken | null>(null)
 
   async function create() {
-    setActionError(undefined)
     try {
       const result = await api.createEnrollmentToken({
         description: 'created from the dashboard',
@@ -26,146 +37,196 @@ export function Settings({ user }: { user: User }) {
       })
       setSecret(result.secret)
       tokens.reload()
+      // Issuing a token is an audited action, and the panel showing the
+      // audit trail is on this same page. Leaving it stale made the page
+      // say nothing had been recorded directly underneath the thing that
+      // had just been recorded.
+      audit.reload()
     } catch (err) {
-      setActionError(err instanceof Error ? err : new Error(String(err)))
+      toast.error('Could not create an enrollment token', { description: message(err) })
     }
   }
 
   async function revoke(token: EnrollmentToken) {
     setRevoking(null)
-    setActionError(undefined)
     try {
       await api.revokeEnrollmentToken(token.id)
+      toast.success('Enrollment token revoked')
       tokens.reload()
+      audit.reload()
     } catch (err) {
-      setActionError(err instanceof Error ? err : new Error(String(err)))
+      toast.error('Could not revoke the token', { description: message(err) })
     }
   }
 
+  const commands = `export RUNNERLY_SERVER_URL=${window.location.origin}
+export RUNNERLY_ENROLLMENT_TOKEN=${secret ?? ''}
+runnerly agent run`
+
   return (
     <div className="space-y-6">
-      <Card title="Signed in as">
-        <dl className="divide-y text-sm" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex justify-between px-4 py-2">
-            <dt style={{ color: 'var(--text-muted)' }}>GitHub account</dt>
-            <dd className="font-mono">{user.login}</dd>
-          </div>
-          <div className="flex justify-between px-4 py-2">
-            <dt style={{ color: 'var(--text-muted)' }}>Last sign-in</dt>
-            <dd>{relativeTime(user.last_login_at, now)}</dd>
-          </div>
-        </dl>
-      </Card>
-
-      {actionError && <Failure error={actionError} />}
+      <Panel title="Signed in as" bodyClassName="divide-y divide-border">
+        <Field name="GitHub account" value={user.login} mono />
+        <Field name="Last sign-in" value={relativeTime(user.last_login_at, now)} />
+      </Panel>
 
       {secret && (
-        <Card title="New enrollment token">
-          <div className="space-y-3 px-4 py-3">
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        <Panel
+          title="New enrollment token"
+          action={
+            <Button variant="ghost" size="sm" onClick={() => setSecret(undefined)}>
+              Done
+            </Button>
+          }
+        >
+          <div className="space-y-3 px-4 py-4">
+            <p className="text-sm text-muted-foreground">
               This is the only time it is shown. The server keeps only its hash.
             </p>
-            <code
-              className="block overflow-x-auto rounded-sm border px-3 py-2 font-mono text-xs"
-              style={{ borderColor: 'var(--border-strong)', background: 'var(--bg-subtle)' }}
-            >
-              {secret}
-            </code>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              On the runner machine:
-            </p>
-            <pre
-              className="overflow-x-auto rounded-sm border px-3 py-2 font-mono text-xs"
-              style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}
-            >
-              {`export RUNNERLY_SERVER_URL=${window.location.origin}
-export RUNNERLY_ENROLLMENT_TOKEN=${secret}
-runnerly agent run`}
-            </pre>
-            <Button onClick={() => setSecret(undefined)}>Done</Button>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 py-1.5 pr-1.5 pl-3">
+              <code className="min-w-0 flex-1 overflow-x-auto font-mono text-xs whitespace-nowrap">
+                {secret}
+              </code>
+              <CopyButton value={secret} label="Copy the token" />
+            </div>
+            <p className="text-sm text-muted-foreground">On the runner machine:</p>
+            <div className="flex items-start gap-1 rounded-lg border border-border bg-muted/40 py-2 pr-1.5 pl-3">
+              <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-xs">{commands}</pre>
+              <CopyButton value={commands} label="Copy the commands" />
+            </div>
           </div>
-        </Card>
+        </Panel>
       )}
 
-      <Card title="Enrollment tokens">
-        <div className="flex justify-end px-4 py-3">
-          <Button onClick={() => void create()}>Create token</Button>
-        </div>
-
+      <Panel
+        title="Enrollment tokens"
+        action={
+          <Button variant="outline" size="sm" onClick={() => void create()}>
+            <PlusIcon />
+            Create token
+          </Button>
+        }
+      >
         {tokens.initial ? (
-          <Spinner />
+          <Loading rows={3} />
         ) : tokens.error ? (
-          <Failure error={tokens.error} />
+          <div className="p-4">
+            <Failure error={tokens.error} />
+          </div>
         ) : (tokens.data?.tokens.length ?? 0) === 0 ? (
-          <Empty
+          <Nothing
             title="No enrollment tokens"
             hint="A machine needs one to enroll. Tokens created here allow a single machine and expire after a day."
-          />
+          >
+            <Button variant="outline" size="sm" onClick={() => void create()}>
+              <KeyRoundIcon />
+              Create one
+            </Button>
+          </Nothing>
         ) : (
-          <Table head={['Created', 'Description', 'Uses', 'State', '']}>
-            {tokens.data!.tokens.map((token) => {
-              const state = tokenState(token, now)
-              return (
-                <Row key={token.id}>
-                  <Cell muted>{relativeTime(token.created_at, now)}</Cell>
-                  <Cell>{orDash(token.description)}</Cell>
-                  <Cell muted>
-                    {token.uses}
-                    {token.max_uses ? `/${token.max_uses}` : ''}
-                  </Cell>
-                  <Cell muted={state !== 'usable'}>{state}</Cell>
-                  <Cell>
-                    {state === 'usable' && (
-                      <button
-                        onClick={() => setRevoking(token)}
-                        className="cursor-pointer text-xs underline"
-                        style={{ color: 'var(--text-muted)' }}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </Cell>
-                </Row>
-              )
-            })}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Uses</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tokens.data!.tokens.map((token) => {
+                const state = tokenState(token, now)
+                return (
+                  <TableRow key={token.id}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {relativeTime(token.created_at, now)}
+                    </TableCell>
+                    <TableCell>{orDash(token.description)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {token.uses}
+                      {token.max_uses ? `/${token.max_uses}` : ''}
+                    </TableCell>
+                    <TableCell className={state === 'usable' ? '' : 'text-muted-foreground'}>
+                      {state}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {state === 'usable' && (
+                        <Button variant="ghost" size="xs" onClick={() => setRevoking(token)}>
+                          Revoke
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
           </Table>
         )}
-      </Card>
+      </Panel>
 
-      <Card title="Audit trail">
+      <Panel title="Audit trail">
         {audit.initial ? (
-          <Spinner />
+          <Loading rows={3} />
         ) : audit.error ? (
-          <Failure error={audit.error} />
+          <div className="p-4">
+            <Failure error={audit.error} />
+          </div>
         ) : (audit.data?.entries.length ?? 0) === 0 ? (
-          <Empty
+          <Nothing
             title="Nothing recorded yet"
             hint="Removing a runner, asking for a restart and issuing a token are all recorded here."
           />
         ) : (
-          <Table head={['When', 'Who', 'Action', 'Target']}>
-            {audit.data!.entries.map((entry) => (
-              <Row key={entry.id}>
-                <Cell muted>{relativeTime(entry.created_at, now)}</Cell>
-                <Cell>{entry.actor}</Cell>
-                <Cell mono>{entry.action}</Cell>
-                <Cell muted>{orDash(entry.target)}</Cell>
-              </Row>
-            ))}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Who</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>Target</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {audit.data!.entries.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {relativeTime(entry.created_at, now)}
+                  </TableCell>
+                  <TableCell>{entry.actor}</TableCell>
+                  <TableCell className="font-mono text-xs">{entry.action}</TableCell>
+                  <TableCell className="text-muted-foreground">{orDash(entry.target)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
           </Table>
         )}
-      </Card>
+      </Panel>
 
       {revoking && (
-        <Confirm
+        <ConfirmDialog
           title="Revoke this enrollment token?"
           danger
-          body="Any machine that has not used it yet will no longer be able to enroll. Machines that already enrolled are unaffected: they hold their own credential."
+          body={
+            <p>
+              Any machine that has not used it yet will no longer be able to enroll. Machines that
+              already enrolled are unaffected: they hold their own credential.
+            </p>
+          }
           confirmLabel="Revoke"
           onConfirm={() => void revoke(revoking)}
           onCancel={() => setRevoking(null)}
         />
       )}
+    </div>
+  )
+}
+
+function Field({ name, value, mono }: { name: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-4 py-2 text-sm">
+      <dt className="text-muted-foreground">{name}</dt>
+      <dd className={mono ? 'font-mono text-xs' : ''}>{value}</dd>
     </div>
   )
 }
@@ -178,4 +239,8 @@ function tokenState(token: EnrollmentToken, now: number): string {
     return 'used up'
   }
   return 'usable'
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }

@@ -1,20 +1,27 @@
 import { useState } from 'react'
+import { ArrowLeftIcon, RotateCwIcon, Trash2Icon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api'
-import { useLoad, useNow } from '../hooks'
-import { bytes, duration, orDash, percent, relativeTime } from '../format'
+import { toast } from 'sonner'
+
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { LoadMeter } from '@/components/LoadMeter'
+import { Panel } from '@/components/Panel'
+import { Failure, Loading, Nothing, PageLoading } from '@/components/states'
+import { LabelTag, SeverityTag, Status } from '@/components/status'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
-  Button,
-  Card,
-  Empty,
-  Failure,
-  Label,
-  SeverityTag,
-  Spinner,
-  Status,
-} from '../components/primitives'
-import { Cell, Row, Table } from '../components/Table'
-import { Confirm } from '../components/Confirm'
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { api } from '@/api'
+import { bytes, duration, orDash, relativeTime } from '@/format'
+import { useLoad, useNow } from '@/hooks'
+import { cn } from '@/lib/utils'
 
 const POLL_MS = 5000
 
@@ -28,33 +35,33 @@ export function RunnerDetail() {
   const commands = useLoad(() => api.commands(id), POLL_MS)
 
   const [confirming, setConfirming] = useState<'restart' | 'remove' | null>(null)
-  const [notice, setNotice] = useState<string>()
-  const [actionError, setActionError] = useState<Error>()
 
   async function restart() {
     setConfirming(null)
-    setActionError(undefined)
     try {
       const result = await api.restartRunner(id)
-      setNotice(result.note)
+      // The note explains that this is queued rather than immediate, which
+      // is the part an operator needs to read before wondering why nothing
+      // has happened yet.
+      toast.success('Restart requested', { description: result.note })
       commands.reload()
     } catch (err) {
-      setActionError(err instanceof Error ? err : new Error(String(err)))
+      toast.error('Could not request a restart', { description: message(err) })
     }
   }
 
   async function remove() {
     setConfirming(null)
-    setActionError(undefined)
     try {
       await api.deleteRunner(id)
+      toast.success('Runner removed from the control plane')
       navigate('/runners')
     } catch (err) {
-      setActionError(err instanceof Error ? err : new Error(String(err)))
+      toast.error('Could not remove the runner', { description: message(err) })
     }
   }
 
-  if (runner.initial) return <Spinner />
+  if (runner.initial) return <PageLoading />
   if (runner.error) return <Failure error={runner.error} />
   if (!runner.data) return null
 
@@ -62,26 +69,34 @@ export function RunnerDetail() {
   const pending = (commands.data?.commands ?? []).filter(
     (c) => c.status === 'pending' || c.status === 'delivered',
   )
+  // A retired runner has no agent left to collect the command.
+  const cannotRestart = r.retired_at
+    ? 'This runner has retired; there is no agent to restart'
+    : pending.length > 0
+      ? 'A restart is already queued'
+      : ''
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link to="/runners" className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            ← Runners
+        <div className="min-w-0">
+          <Link
+            to="/runners"
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeftIcon className="size-3.5" />
+            Runners
           </Link>
           <h1 className="mt-1 text-xl font-medium">{r.name}</h1>
-          <div className="mt-1 flex items-center gap-3 text-sm">
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-sm">
             <Status status={r.status} health={r.health} />
-            <span style={{ color: 'var(--text-muted)' }}>{r.github_scope_id}</span>
+            <span className="font-mono text-muted-foreground">{r.github_scope_id}</span>
           </div>
           {r.status_detail && (
-            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
-              {r.status_detail}
-            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{r.status_detail}</p>
           )}
           {r.retired_at && (
-            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+            <p className="mt-1 max-w-prose text-sm text-muted-foreground">
               Retired {relativeTime(r.retired_at, now)}
               {r.retired_reason ? `: ${r.retired_reason}` : ''}. An ephemeral runner retires when
               its job is done, so this is a finished run rather than a failure.
@@ -90,48 +105,36 @@ export function RunnerDetail() {
         </div>
 
         <div className="flex gap-2">
-          <Button
+          <RestartButton
+            reason={cannotRestart}
+            queued={pending.length > 0}
             onClick={() => setConfirming('restart')}
-            // A retired runner has no agent left to collect the command.
-            disabled={pending.length > 0 || Boolean(r.retired_at)}
-            title={
-              r.retired_at
-                ? 'This runner has retired; there is no agent to restart'
-                : pending.length > 0
-                  ? 'A restart is already queued'
-                  : undefined
-            }
-          >
-            {pending.length > 0 ? 'Restart queued' : 'Restart'}
-          </Button>
-          <Button variant="danger" onClick={() => setConfirming('remove')}>
+          />
+          <Button variant="destructive" size="sm" onClick={() => setConfirming('remove')}>
+            <Trash2Icon />
             Remove
           </Button>
         </div>
       </div>
 
-      {actionError && <Failure error={actionError} />}
-      {notice && (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          {notice}
-        </p>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Machine">
-          <dl className="divide-y text-sm" style={{ borderColor: 'var(--border)' }}>
-            <Field name="Platform" value={`${orDash(r.os)}/${orDash(r.architecture)}`} />
-            <Field name="CPU" value={r.cpu_count ? `${r.cpu_count} cores` : '—'} />
-            <Field name="Memory" value={bytes(r.memory_bytes)} />
-            <Field name="Disk" value={bytes(r.disk_bytes)} />
-            <Field name="Runner" value={orDash(r.runner_version)} />
-            <Field name="Agent" value={orDash(r.agent_version)} />
-            <Field name="Ephemeral" value={r.ephemeral ? 'yes' : 'no'} />
-          </dl>
-        </Card>
+        <Panel title="Machine" bodyClassName="divide-y divide-border">
+          <Field name="Platform" value={`${orDash(r.os)}/${orDash(r.architecture)}`} />
+          <Field name="CPU" value={r.cpu_count ? `${r.cpu_count} cores` : '—'} />
+          <Field name="Memory" value={bytes(r.memory_bytes)} />
+          <Field name="Disk" value={bytes(r.disk_bytes)} />
+          <Field name="Runner" value={orDash(r.runner_version)} mono />
+          <Field name="Agent" value={orDash(r.agent_version)} mono />
+          <Field name="Ephemeral" value={r.ephemeral ? 'yes' : 'no'} />
+        </Panel>
 
-        <Card title="Reporting">
-          <dl className="divide-y text-sm" style={{ borderColor: 'var(--border)' }}>
+        <Panel title="Reporting">
+          <div className="space-y-4 px-4 py-4">
+            <LoadMeter name="Processor" value={r.cpu_percent} />
+            <LoadMeter name="Memory" value={r.memory_percent} />
+            <LoadMeter name="Disk" value={r.disk_percent} />
+          </div>
+          <div className="divide-y divide-border border-t border-border">
             <Field
               name="Last heartbeat"
               value={
@@ -140,82 +143,104 @@ export function RunnerDetail() {
                   : `${duration(r.last_heartbeat_age_seconds)} ago`
               }
             />
-            <Field name="CPU load" value={percent(r.cpu_percent)} />
-            <Field name="Memory used" value={percent(r.memory_percent)} />
-            <Field name="Disk used" value={percent(r.disk_percent)} />
             <Field name="Enrolled" value={relativeTime(r.created_at, now)} />
-            <Field name="GitHub host" value={r.github_host} />
-          </dl>
-          <p className="px-4 py-3 text-xs" style={{ color: 'var(--text-faint)' }}>
-            Load figures are only as fresh as the last heartbeat, and a dash means the agent has not
-            measured that yet.
+            <Field name="GitHub host" value={r.github_host} mono />
+          </div>
+          <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            Load figures are only as fresh as the last heartbeat, and a dash means the agent has no
+            way to measure that one.
           </p>
-        </Card>
+        </Panel>
       </div>
 
-      <Card title="Labels">
+      <Panel title="Labels">
         {r.labels.length === 0 ? (
-          <Empty title="No labels" />
+          <Nothing title="No labels" />
         ) : (
           <div className="flex flex-wrap gap-1.5 px-4 py-3">
             {r.labels.map((label) => (
-              <Label key={label}>{label}</Label>
+              <LabelTag key={label}>{label}</LabelTag>
             ))}
           </div>
         )}
-      </Card>
+      </Panel>
 
       {(commands.data?.commands.length ?? 0) > 0 && (
-        <Card title="Commands">
-          <Table head={['When', 'Command', 'Status', 'By', 'Detail']}>
-            {commands.data!.commands.map((c) => (
-              <Row key={c.id}>
-                <Cell muted>{relativeTime(c.created_at, now)}</Cell>
-                <Cell mono>{c.command}</Cell>
-                <Cell muted={c.status !== 'failed'} {...(c.status === 'failed' ? {} : {})}>
-                  <span style={c.status === 'failed' ? { color: 'var(--bad)' } : undefined}>
+        <Panel title="Commands">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Command</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>Detail</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {commands.data!.commands.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {relativeTime(c.created_at, now)}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{c.command}</TableCell>
+                  <TableCell
+                    className={cn(c.status === 'failed' ? 'text-bad' : 'text-muted-foreground')}
+                  >
                     {c.status}
-                  </span>
-                </Cell>
-                <Cell muted>{orDash(c.requested_by)}</Cell>
-                <Cell muted>{orDash(c.error)}</Cell>
-              </Row>
-            ))}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{orDash(c.requested_by)}</TableCell>
+                  <TableCell className="text-muted-foreground">{orDash(c.error)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
           </Table>
-        </Card>
+        </Panel>
       )}
 
-      <Card title="Events">
+      <Panel title="Events">
         {events.initial ? (
-          <Spinner />
+          <Loading rows={3} />
         ) : (events.data?.events.length ?? 0) === 0 ? (
-          <Empty title="No events for this runner yet" />
+          <Nothing title="No events for this runner yet" />
         ) : (
-          <Table head={['When', 'Severity', 'Event', 'Message']}>
-            {events.data!.events.map((event) => (
-              <Row key={event.id}>
-                <Cell muted>{relativeTime(event.created_at, now)}</Cell>
-                <Cell>
-                  <SeverityTag severity={event.severity} />
-                </Cell>
-                <Cell mono>{event.event}</Cell>
-                <Cell muted>{event.message ?? ''}</Cell>
-              </Row>
-            ))}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Severity</TableHead>
+                <TableHead>Event</TableHead>
+                <TableHead>Message</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {events.data!.events.map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {relativeTime(event.created_at, now)}
+                  </TableCell>
+                  <TableCell>
+                    <SeverityTag severity={event.severity} />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{event.event}</TableCell>
+                  <TableCell className="text-muted-foreground">{event.message ?? ''}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
           </Table>
         )}
-      </Card>
+      </Panel>
 
       {confirming === 'restart' && (
-        <Confirm
+        <ConfirmDialog
           title={`Restart ${r.name}?`}
           body={
             <>
-              The agent stops the runner and starts it again. It sends SIGTERM first, so a job
-              already running gets to finish.
-              <br />
-              <br />
-              This is queued, not immediate: the agent collects it on its next heartbeat.
+              <p>
+                The agent stops the runner and starts it again. It sends SIGTERM first, so a job
+                already running gets to finish.
+              </p>
+              <p>This is queued, not immediate: the agent collects it on its next heartbeat.</p>
             </>
           }
           confirmLabel="Restart"
@@ -225,19 +250,23 @@ export function RunnerDetail() {
       )}
 
       {confirming === 'remove' && (
-        <Confirm
+        <ConfirmDialog
           title={`Remove ${r.name}?`}
           danger
           body={
             <>
-              This forgets the runner here. It does <strong>not</strong> deregister it with GitHub
-              and does not touch the machine, so it will reappear the next time its agent sends a
-              heartbeat.
-              <br />
-              <br />
-              To retire it for good, run{' '}
-              <code className="font-mono">runnerly runner remove {r.name} --purge</code> on the
-              machine first.
+              <p>
+                This forgets the runner here. It does <strong>not</strong> deregister it with GitHub
+                and does not touch the machine, so it will reappear the next time its agent sends a
+                heartbeat.
+              </p>
+              <p>
+                To retire it for good, run{' '}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+                  runnerly runner remove {r.name} --purge
+                </code>{' '}
+                on the machine first.
+              </p>
             </>
           }
           confirmLabel="Remove"
@@ -249,11 +278,48 @@ export function RunnerDetail() {
   )
 }
 
-function Field({ name, value }: { name: string; value: string }) {
+/**
+ * A disabled button that does not say why is a dead end, and `title` only
+ * appears for a mouse. The tooltip needs a live element to hang off, so
+ * the button is wrapped rather than disabled outright.
+ */
+function RestartButton({
+  reason,
+  queued,
+  onClick,
+}: {
+  reason: string
+  queued: boolean
+  onClick: () => void
+}) {
+  const button = (
+    <Button variant="outline" size="sm" onClick={onClick} disabled={Boolean(reason)}>
+      <RotateCwIcon />
+      {queued ? 'Restart queued' : 'Restart'}
+    </Button>
+  )
+
+  if (!reason) return button
+
   return (
-    <div className="flex justify-between gap-4 px-4 py-2" style={{ borderColor: 'var(--border)' }}>
-      <dt style={{ color: 'var(--text-muted)' }}>{name}</dt>
-      <dd className="text-right">{value}</dd>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0}>{button}</span>
+      </TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function Field({ name, value, mono }: { name: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-4 py-2 text-sm">
+      <dt className="text-muted-foreground">{name}</dt>
+      <dd className={cn('text-right', mono && 'font-mono text-xs')}>{value}</dd>
     </div>
   )
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }

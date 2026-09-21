@@ -277,7 +277,12 @@ Three of those steps exist because something got past the others:
 ## Dependencies
 
 Three direct Go dependencies: `spf13/cobra`, `gopkg.in/yaml.v3` and
-`jackc/pgx/v5`. The dashboard has three: `react`, `react-dom` and
-`react-router-dom`. Adding a fourth to either needs a justification in the
-pull request — see [CONTRIBUTING.md](../CONTRIBUTING.md) and the reasoning in
+`jackc/pgx/v5`. Adding a fourth needs a justification in the pull request —
+see [CONTRIBUTING.md](../CONTRIBUTING.md) and the reasoning in
 [architecture.md](architecture.md#dependency-policy).
+
+The dashboard is React, `react-router-dom` and shadcn/ui, whose components
+are copied into `web/src/components/ui/` rather than imported. Those files
+are vendored: the CLI overwrites them on an update, so fix things around
+them rather than in them, and expect a `shadcn add` to replace whatever you
+write there.

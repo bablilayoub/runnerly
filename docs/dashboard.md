@@ -117,12 +117,23 @@ properly.
 
 Monochrome, dense, high contrast. Color appears in exactly one place — runner
 status and event severity — because that is where hue carries meaning rather
-than decoration.
+than decoration. It never carries it alone: every status dot sits beside its
+word, so the page works in greyscale.
 
 Numbers use tabular figures so columns line up. Tables scroll horizontally on
 a narrow screen rather than reflowing into something unreadable. Polling
 updates data in place instead of blanking the page, and stops while the tab is
 hidden.
+
+Light and dark both work, and the theme follows the operating system until
+you pick one from the header. The choice is written to `<html>` by a script
+in the page head before anything paints, so a reader who chose dark never
+sees a white flash on the way in.
+
+The components come from [shadcn/ui](https://ui.shadcn.com), copied into
+`web/src/components/ui/` rather than imported from a package. See the
+[dependency policy](architecture.md#dependency-policy) for why the dashboard
+changed its mind about that.
 
 ## Building it
 

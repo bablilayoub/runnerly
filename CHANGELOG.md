@@ -6,6 +6,27 @@ land.
 
 ## Unreleased
 
+### Changed
+
+- The dashboard is rebuilt on [shadcn/ui](https://ui.shadcn.com). It looks
+  like the same dashboard, deliberately — monochrome, dense, status the
+  only coloured thing — but the parts underneath that have to handle focus,
+  Escape, click-outside and arrow keys are Radix's rather than hand-rolled.
+  It also gains the logo, a light theme that follows the operating system
+  until you pick one, toasts in place of inline notices, skeletons in place
+  of the word "Loading", copy buttons on the enrollment commands, and bars
+  rather than bare numbers for processor, memory and disk. Every colour was
+  measured against its background; amber had to come down a step to clear
+  4.5:1 in the light theme.
+- The runners list shows each machine's load as three small bars, so the
+  one that is working is visible while scanning rather than one page in.
+
+### Fixed
+
+- Issuing or revoking an enrollment token left the audit trail on the same
+  page saying nothing had been recorded, directly underneath the thing that
+  had just been recorded.
+
 ## 0.1.2
 
 ### Added
