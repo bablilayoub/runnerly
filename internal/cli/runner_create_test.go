@@ -118,7 +118,10 @@ func TestRunnerCreateRegistersAPrivateRepository(t *testing.T) {
 		"runnerly-01 is registered",
 		"acme/widgets",
 		"runnerly agent run runnerly-01",
-		"runnerly agent systemd runnerly-01",
+		// Whichever one this machine can actually follow: pointing a Mac
+		// at `agent systemd` is advice for a service manager it does not
+		// have, and this is the line people read right after setup.
+		"runnerly agent " + serviceGenerator() + " runnerly-01",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)

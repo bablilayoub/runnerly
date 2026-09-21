@@ -46,7 +46,7 @@ func newSetupCommand(e *env) *cobra.Command {
 			"commands that keep it running.\n\n" +
 			"Nothing is changed until it has shown you what it is going to do. Every\n" +
 			"step it takes has a command of its own, so nothing here is a black box:\n" +
-			"doctor, login, config init, runner create, agent systemd.\n\n" +
+			"doctor, login, config init, runner create, agent " + serviceGenerator() + ".\n\n" +
 			"For provisioning, pass --repo and --yes and supply the token through\n" +
 			"RUNNERLY_GITHUB_TOKEN. It then prompts for nothing and fails rather than\n" +
 			"asking.",
@@ -607,10 +607,11 @@ func (s *setup) finish() {
 	s.p.Println()
 	s.p.Printf("  runnerly agent run %s\n", s.name)
 	s.p.Println()
-	s.p.Println("Or keep it running across reboots. This prints a unit and the commands")
-	s.p.Println("to install it; it does not run them, because they need root:")
+	s.p.Println("Or keep it running across reboots. This prints the service file this")
+	s.p.Println("machine's service manager wants, and the commands to install it; it")
+	s.p.Println("does not run them:")
 	s.p.Println()
-	s.p.Printf("  runnerly agent systemd %s\n", s.name)
+	s.p.Printf("  runnerly agent %s %s\n", serviceGenerator(), s.name)
 	s.p.Println()
 	s.p.Println("Then send it a job:")
 	s.p.Println()

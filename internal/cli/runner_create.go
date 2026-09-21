@@ -122,7 +122,7 @@ func newRunnerCreateCommand(e *env) *cobra.Command {
 			p.Println("  runnerly agent run " + name)
 			p.Println()
 			p.Println("Or install it as a service:")
-			p.Println("  runnerly agent systemd " + name)
+			p.Println("  runnerly agent " + serviceGenerator() + " " + name)
 			return nil
 		},
 	}

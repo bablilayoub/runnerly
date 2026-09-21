@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -105,7 +106,10 @@ func TestSetupRegistersARunnerEndToEnd(t *testing.T) {
 		"signed in to github.com as octocat",
 		"runnerly-01 is registered",
 		"runnerly agent run runnerly-01",
-		"runnerly agent systemd runnerly-01",
+		// Whichever one this machine can actually follow: pointing a Mac
+		// at `agent systemd` is advice for a service manager it does not
+		// have, and this is the line people read right after setup.
+		"runnerly agent " + serviceGenerator() + " runnerly-01",
 		"runs-on:",
 	} {
 		if !strings.Contains(out, want) {
@@ -114,6 +118,14 @@ func TestSetupRegistersARunnerEndToEnd(t *testing.T) {
 	}
 	if strings.Contains(out, "AREGTOKEN") {
 		t.Errorf("the registration token leaked into the output:\n%s", out)
+	}
+	for _, wrong := range []string{"systemd", "launchd", "schtasks"} {
+		if wrong == serviceGenerator() {
+			continue
+		}
+		if strings.Contains(out, "agent "+wrong) {
+			t.Errorf("setup offered `agent %s` on %s:\n%s", wrong, runtime.GOOS, out)
+		}
 	}
 }
 
