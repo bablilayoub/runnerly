@@ -325,6 +325,11 @@ jobs:
             throw "doctor did not report on the operating system"
           }
           Write-Host "doctor exited $verdict with $($report.checks.Count) checks"
+          # The step's own exit code, not doctor's. GitHub ends a pwsh
+          # step with `exit $LASTEXITCODE`, which is still doctor's 1 —
+          # reading it into a variable does not clear it, and the step
+          # failed for a verdict it was deliberately not judging.
+          exit 0
         shell: pwsh
 
       - name: Check the machine readings actually ran
