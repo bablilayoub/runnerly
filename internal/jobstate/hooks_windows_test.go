@@ -20,11 +20,17 @@ import (
 // chunk replaced by an environment variable. Reading the file back only
 // proves what was written; running it proves what it means.
 func TestBatchHookRunsUnderCmd(t *testing.T) {
-	// A directory whose name needs both defenses at once.
-	dir := filepath.Join(t.TempDir(), "runner 100%dir")
+	// A space in the runner's own directory, so the hook's invocation of
+	// the binary has to be quoted — and the percent sign in an argument
+	// rather than in the hook's own path. `cmd /c` expands a percent in
+	// the path it is handed, which the runner never does: it starts the
+	// hook through CreateProcess. Putting one there would test cmd, not
+	// Runnerly.
+	dir := filepath.Join(t.TempDir(), "runner dir")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
+	configPath := filepath.Join(dir, "100%config", "config.yaml")
 
 	// Stand in for the runnerly binary: a .cmd that writes down every
 	// argument it was given, one per line.
@@ -45,7 +51,7 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hooks, err := installHooks("windows", dir, fake, "")
+	hooks, err := installHooks("windows", dir, fake, configPath)
 	if err != nil {
 		t.Fatalf("installHooks: %v", err)
 	}
@@ -59,19 +65,28 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the hook never reached the binary it names: %v\n%s", err, out)
 	}
-	args := strings.Fields(strings.ReplaceAll(string(body), "\r\n", "\n"))
-
-	// The state path is the one that carries the awkward directory name,
-	// and it has to arrive as a single argument, spelled exactly.
-	want := Path(dir)
-	var found bool
-	for _, arg := range args {
-		if arg == want {
-			found = true
+	// One argument per line, not per word: the whole point is that a path
+	// with a space in it arrives as one argument, and splitting on
+	// whitespace here would hide exactly the failure being looked for.
+	var args []string
+	for _, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			args = append(args, trimmed)
 		}
 	}
-	if !found {
-		t.Errorf("the state path did not survive the batch file.\nwant %q\ngot  %q", want, args)
+
+	// Both awkward paths have to arrive as single arguments, spelled
+	// exactly: the state path carries a space, the config path a percent.
+	for _, want := range []string{Path(dir), configPath} {
+		var found bool
+		for _, arg := range args {
+			if arg == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("a path did not survive the batch file.\nwant %q\ngot  %q", want, args)
+		}
 	}
 
 	// And the command itself has to be the one Runnerly meant.

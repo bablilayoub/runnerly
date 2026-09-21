@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"unicode/utf16"
 
 	"github.com/spf13/cobra"
 
@@ -41,7 +42,7 @@ import (
 //     fight the first over the same runner directory.
 //   - StopIfGoingOnBatteries false: the defaults are written for a laptop
 //     doing housekeeping, not for a machine whose job is to be available.
-const taskXML = `<?xml version="1.0" encoding="UTF-8"?>
+const taskXML = `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>{{xml .Description}}</Description>
@@ -98,6 +99,25 @@ type taskValues struct {
 	Binary      string
 	Arguments   string
 	Dir         string
+}
+
+// utf16LE encodes the document the way schtasks insists on reading it.
+//
+// This is not a preference. Task Scheduler refuses a UTF-8 document with
+// "The task XML is malformed. (1,40)::ERROR: unable to switch the
+// encoding", pointing at the encoding declaration and saying nothing
+// about what it wanted instead. It was found by importing one.
+func utf16LE(s string) []byte {
+	units := utf16.Encode([]rune(s))
+
+	// A byte order mark, then each unit little-endian.
+	out := make([]byte, 0, 2+len(units)*2)
+	out = append(out, 0xFF, 0xFE)
+	for _, u := range units {
+		//nolint:gosec // G115: taking the low and high byte of a uint16 is the encoding
+		out = append(out, byte(u&0xFF), byte(u>>8))
+	}
+	return out
 }
 
 // renderTask fills the template, escaping every value.
@@ -254,12 +274,19 @@ func (e *env) emitTask(rendered, output string, v taskValues, regenerate string)
 	p := e.printer()
 
 	if output != "" {
-		if err := os.WriteFile(output, []byte(rendered), 0o600); err != nil {
+		if err := os.WriteFile(output, utf16LE(rendered), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", output, err)
 		}
 		p.Pass("wrote %s", output)
 	} else {
+		// Readable here, rather than a wall of UTF-16 in a terminal. The
+		// file --output writes is the one schtasks will accept, and the
+		// note below says so, because redirecting this instead would be
+		// rejected for a reason that names a column number.
 		fmt.Fprint(e.out, rendered)
+		p.Println()
+		p.Dim("# schtasks only reads UTF-16. Use --output, which writes it;")
+		p.Dim("# redirecting this output produces a file it will refuse.")
 		p.Println()
 	}
 
