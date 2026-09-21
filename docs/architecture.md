@@ -239,7 +239,7 @@ Deliberately out of scope: Kubernetes, autoscaling, cloud provisioning, GPU
 scheduling, multi-tenancy and local workflow execution.
 
 Windows is not supported yet, which used to be a decision and is now a gap:
-the job hooks are a `.cmd` there, the release unpacks from its zip, a
+the job hooks are PowerShell there, the release unpacks from its zip, a
 graceful stop is a console event, and CI checks each of those on a real
 Windows machine. What is missing is an installer and an end-to-end run. See
 [windows.md](windows.md).

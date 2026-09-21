@@ -11,7 +11,7 @@ land.
 - **Windows has the platform pieces it was missing**, and a
   `windows-latest` CI job that checks them on a real Windows machine
   rather than by cross-compiling. The release unpacks from its zip, the
-  job hooks are a `.cmd`, a graceful stop is a console control event, a
+  job hooks are a `.ps1`, a graceful stop is a console control event, a
   secret is read through the console API, the machine readings come from
   kernel32, and `agent schtasks` prints a scheduled task — a task rather
   than a service, because the Service Control Manager would start a

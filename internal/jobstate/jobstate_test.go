@@ -222,9 +222,10 @@ func TestFromEnvironmentReadsWhatTheRunnerExports(t *testing.T) {
 	}
 }
 
-// The Windows hook is a .cmd, because a shell script is not a program on
-// Windows and the runner starts a hook the way the system starts anything.
-func TestInstallHooksWritesBatchOnWindows(t *testing.T) {
+// The Windows hook is PowerShell, because those are the only two kinds
+// GitHub's runner will start: it reads the extension and hands a .sh to
+// bash and a .ps1 to pwsh. A .cmd would never run.
+func TestInstallHooksWritesPowerShellOnWindows(t *testing.T) {
 	dir := t.TempDir()
 
 	hooks, err := installHooks("windows", dir, `C:\Program Files\runnerly\runnerly.exe`, "")
@@ -232,8 +233,8 @@ func TestInstallHooksWritesBatchOnWindows(t *testing.T) {
 		t.Fatalf("installHooks: %v", err)
 	}
 
-	if filepath.Ext(hooks.Started) != ".cmd" || filepath.Ext(hooks.Completed) != ".cmd" {
-		t.Errorf("hooks are %q and %q, want .cmd files", hooks.Started, hooks.Completed)
+	if filepath.Ext(hooks.Started) != ".ps1" || filepath.Ext(hooks.Completed) != ".ps1" {
+		t.Errorf("hooks are %q and %q, want .ps1 files", hooks.Started, hooks.Completed)
 	}
 
 	body, err := os.ReadFile(hooks.Started) //nolint:gosec // a path this test made
@@ -242,50 +243,35 @@ func TestInstallHooksWritesBatchOnWindows(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{
-		"@echo off",
-		`call "C:\Program Files\runnerly\runnerly.exe" agent hook started`,
+		`& 'C:\Program Files\runnerly\runnerly.exe' agent hook started`,
 		// The runner fails the job if a hook exits non-zero, so it must not.
-		"exit /b 0",
+		"exit 0",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the hook is missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "|| true") {
-		t.Errorf("a shell idiom leaked into the batch hook:\n%s", text)
+	for _, unwanted := range []string{"|| true", "@echo off", "exit /b"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("%q leaked into the PowerShell hook:\n%s", unwanted, text)
+		}
 	}
 }
 
-// cmd expands %NAME% inside double quotes as happily as outside, and a
-// Windows directory name may legally contain a percent sign. Left alone,
-// the hook would be handed a path with a chunk of it replaced by an
-// environment variable, or by nothing.
-func TestBatchQuoteDoublesPercentSigns(t *testing.T) {
-	got := batchQuote(`C:\builds\100%done\%USERNAME%`)
-	if !strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, `"`) {
-		t.Errorf("batchQuote() = %s, want it quoted", got)
-	}
-	// Three in, six out, and none of them left able to expand.
-	if strings.Count(got, "%") != 6 {
-		t.Errorf("batchQuote() = %s, want every percent doubled", got)
-	}
-	if got != `"C:\builds\100%%done\%%USERNAME%%"` {
-		t.Errorf("batchQuote() = %s", got)
-	}
-}
-
-// The hook is a `call` line, and `call` expands the line it was handed a
-// second time. Four become two become one.
-func TestBatchQuoteCalledSurvivesTwoExpansions(t *testing.T) {
-	got := batchQuoteCalled(`C:\builds\100%done`)
-	if got != `"C:\builds\100%%%%done"` {
-		t.Errorf("batchQuoteCalled() = %s", got)
+// A single quote is legal in a Windows path and is the one character
+// that ends a PowerShell single-quoted string early. Doubling is
+// PowerShell's own escape for it.
+func TestPowerShellQuoteDoublesSingleQuotes(t *testing.T) {
+	got := powershellQuote(`C:\Users\O'Brien\runners`)
+	if got != `'C:\Users\O''Brien\runners'` {
+		t.Errorf("powershellQuote() = %s", got)
 	}
 
-	// What cmd does to it: each pass halves the run of percent signs.
-	pass := func(s string) string { return strings.ReplaceAll(s, "%%", "%") }
-	if final := pass(pass(got)); final != `"C:\builds\100%done"` {
-		t.Errorf("after two expansions = %s, want the path back", final)
+	// And expands nothing: the shape of the failure this prevents is a
+	// path arriving with a chunk replaced by a variable's value.
+	plain := powershellQuote(`C:\builds\$env:USERNAME 100%done`)
+	if plain != `'C:\builds\$env:USERNAME 100%done'` {
+		t.Errorf("powershellQuote() = %s, want it left alone inside single quotes", plain)
 	}
 }
 

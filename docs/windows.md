@@ -14,10 +14,12 @@ not cross-compiled and assumed.
 - **Unpacking the release.** GitHub ships a zip for Windows rather than a
   tar.gz, and `runner create` reads both, with the same refusal to write
   anything outside the directory it was given.
-- **The job hooks.** They are a `.cmd` here, because a shell script is not
-  a program on Windows. CI runs the generated hook through the real
-  `cmd.exe` and checks that a path containing a space and a percent sign
-  arrives intact.
+- **The job hooks.** They are a `.ps1` here. GitHub's runner starts
+  exactly two kinds — it reads the extension and hands a `.sh` to bash and
+  a `.ps1` to PowerShell — so a batch file would never run at all. CI
+  invokes the generated hook the way the runner does,
+  `pwsh -command ". '<path>'"`, against a real compiled executable, and
+  checks that a path with a space and an apostrophe arrives intact.
 - **Stopping a runner gracefully.** There are no signals, so the agent
   sends `CTRL_BREAK_EVENT` to the runner's process group. CI checks that
   the event reaches the runner and does not reach the agent.

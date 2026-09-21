@@ -10,64 +10,106 @@ import (
 	"testing"
 )
 
-// TestBatchHookRunsUnderCmd is the test that could not be written
-// anywhere else: it hands the generated hook to the real cmd.exe and
-// checks what arrives on the other side.
+// powershell returns the shell GitHub's runner would use, preferring the
+// one it prefers.
+func powershell(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{"pwsh", "powershell"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
+	}
+	t.Skip("neither pwsh nor powershell is on PATH")
+	return ""
+}
+
+// buildRecorder compiles a real .exe that writes down the arguments it
+// was given, one per line, and exits with RUNNERLY_EXIT.
 //
-// Quoting is the whole risk here. A path with a space, or with a percent
-// sign, is legal on Windows and is exactly what an unquoted or
-// half-quoted batch line turns into two arguments, or into a path with a
-// chunk replaced by an environment variable. Reading the file back only
-// proves what was written; running it proves what it means.
-func TestBatchHookRunsUnderCmd(t *testing.T) {
-	// A space in the runner's own directory, so the hook's invocation of
-	// the binary has to be quoted — and the percent sign in an argument
-	// rather than in the hook's own path. `cmd /c` expands a percent in
-	// the path it is handed, which the runner never does: it starts the
-	// hook through CreateProcess. Putting one there would test cmd, not
-	// Runnerly.
-	dir := filepath.Join(t.TempDir(), "runner dir")
+// A real executable rather than a script, because PowerShell passes
+// arguments to a native program differently from how it passes them to a
+// .ps1 — and a native program is what the hook actually calls.
+func buildRecorder(t *testing.T, dir string) string {
+	t.Helper()
+
+	src := filepath.Join(dir, "recorder")
+	if err := os.MkdirAll(src, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module recorder\n\ngo 1.25\n")
+	write("main.go", `package main
+
+import (
+	"os"
+	"strconv"
+	"strings"
+)
+
+func main() {
+	if record := os.Getenv("RUNNERLY_RECORD"); record != "" {
+		_ = os.WriteFile(record, []byte(strings.Join(os.Args[1:], "\n")), 0o600)
+	}
+	code, _ := strconv.Atoi(os.Getenv("RUNNERLY_EXIT"))
+	os.Exit(code)
+}
+`)
+
+	exe := filepath.Join(dir, "recorder.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", exe, ".")
+	build.Dir = src
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the recorder: %v\n%s", err, out)
+	}
+	return exe
+}
+
+// TestPowerShellHookRunsTheWayTheRunnerRunsIt invokes the hook exactly as
+// GitHub's runner does — `pwsh -command ". '<path>'"` — and reads back
+// what reached the other side.
+//
+// Quoting is the risk. A path with a space has to arrive as one argument,
+// and a path with an apostrophe has to arrive at all: a single quote is
+// the one character that ends a PowerShell single-quoted string early.
+// Reading the generated file proves what was written; running it proves
+// what it means.
+func TestPowerShellHookRunsTheWayTheRunnerRunsIt(t *testing.T) {
+	shell := powershell(t)
+	root := t.TempDir()
+
+	// The hook's own path stays plain: the runner wraps it in single
+	// quotes itself, so an apostrophe there would break the runner rather
+	// than Runnerly. The awkward characters go in an argument, which is
+	// what this quoting is responsible for.
+	dir := filepath.Join(root, "runner dir")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(dir, "100%config", "config.yaml")
+	configPath := filepath.Join(dir, "O'Brien 100%conf", "config.yaml")
+	record := filepath.Join(root, "args.txt")
 
-	// Stand in for the runnerly binary: a .cmd that writes down every
-	// argument it was given, one per line.
-	record := filepath.Join(dir, "args.txt")
-	fake := filepath.Join(dir, "fake runnerly.cmd")
-	// The record path has a percent sign in it too, so this script has to
-	// escape it the same way the hook does. Getting that wrong here is
-	// how the first run of this test reported a hook that never ran.
-	script := "@echo off\r\n" +
-		":loop\r\n" +
-		"if \"%~1\"==\"\" goto done\r\n" +
-		"echo %~1>>" + batchQuote(record) + "\r\n" +
-		"shift\r\n" +
-		"goto loop\r\n" +
-		":done\r\n" +
-		"exit /b 0\r\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	hooks, err := installHooks("windows", dir, fake, configPath)
+	hooks, err := installHooks("windows", dir, buildRecorder(t, root), configPath)
 	if err != nil {
 		t.Fatalf("installHooks: %v", err)
 	}
 
-	out, err := exec.CommandContext(t.Context(), "cmd", "/c", hooks.Started).CombinedOutput()
-	if err != nil {
+	cmd := exec.CommandContext(t.Context(), shell, "-command", ". '"+hooks.Started+"'")
+	cmd.Env = append(os.Environ(), "RUNNERLY_RECORD="+record, "RUNNERLY_EXIT=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("running the hook: %v\n%s", err, out)
 	}
 
-	body, err := os.ReadFile(record)
+	body, err := os.ReadFile(record) //nolint:gosec // a path this test made
 	if err != nil {
-		t.Fatalf("the hook never reached the binary it names: %v\n%s", err, out)
+		t.Fatalf("the hook never reached the binary it names: %v", err)
 	}
 	// One argument per line, not per word: the whole point is that a path
-	// with a space in it arrives as one argument, and splitting on
-	// whitespace here would hide exactly the failure being looked for.
+	// with a space arrives as one argument, and splitting on whitespace
+	// would hide exactly the failure being looked for.
 	var args []string
 	for _, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
@@ -75,9 +117,7 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 		}
 	}
 
-	// Both awkward paths have to arrive as single arguments, spelled
-	// exactly: the state path carries a space, the config path a percent.
-	for _, want := range []string{Path(dir), configPath} {
+	for _, want := range []string{"agent", "hook", "started", Path(dir), configPath} {
 		var found bool
 		for _, arg := range args {
 			if arg == want {
@@ -85,36 +125,24 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("a path did not survive the batch file.\nwant %q\ngot  %q", want, args)
+			t.Errorf("%q did not survive the hook.\ngot %q", want, args)
 		}
-	}
-
-	// And the command itself has to be the one Runnerly meant.
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "agent hook started --state") {
-		t.Errorf("the hook did not invoke the right command: %q", joined)
 	}
 }
 
 // A hook that exits non-zero fails the job. Runnerly's bookkeeping going
-// wrong must never do that, so the batch file swallows it.
-//
-// This is the test that found the `call`. Without it, batch hands control
-// to the other file and never takes it back, the exit line is never
-// reached, and the hook returns the failure it was supposed to absorb.
-func TestBatchHookExitsZeroEvenWhenTheBinaryFails(t *testing.T) {
-	dir := t.TempDir()
+// wrong must never do that, so the hook swallows it.
+func TestPowerShellHookExitsZeroEvenWhenTheBinaryFails(t *testing.T) {
+	shell := powershell(t)
+	root := t.TempDir()
 
-	failing := filepath.Join(dir, "failing.cmd")
-	if err := os.WriteFile(failing, []byte("@echo off\r\nexit /b 3\r\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	hooks, err := installHooks("windows", dir, failing, "")
+	hooks, err := installHooks("windows", root, buildRecorder(t, root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), "cmd", "/c", hooks.Completed)
+
+	cmd := exec.CommandContext(t.Context(), shell, "-command", ". '"+hooks.Completed+"'")
+	cmd.Env = append(os.Environ(), "RUNNERLY_EXIT=3")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Errorf("the hook passed a failure on to the runner: %v\n%s", err, out)
 	}
