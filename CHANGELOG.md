@@ -6,6 +6,8 @@ land.
 
 ## Unreleased
 
+## 0.1.3
+
 ### Added
 
 - **Windows has the platform pieces it was missing**, and a
