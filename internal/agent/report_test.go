@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,5 +280,50 @@ func TestSeverityForMarksTroubleAsTrouble(t *testing.T) {
 		if got, _ := severityFor(supervisor.Event{Kind: kind}); got != want {
 			t.Errorf("severityFor(%s) = %q, want %q", kind, got, want)
 		}
+	}
+}
+
+// TestReportingStopsAfterTheCredentialIsRefused covers a message that was
+// not true.
+//
+// On a 401 the agent logged "reporting is stopping" and returned — from
+// that one heartbeat. The ticker brought it straight back twenty seconds
+// later, and the same error repeated for as long as the agent ran. Seen
+// on a real agent whose runner row had been deleted: four identical
+// ERROR lines a minute, in a log someone is supposed to read.
+func TestReportingStopsAfterTheCredentialIsRefused(t *testing.T) {
+	var calls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized","message":"no"}`))
+	}))
+	defer srv.Close()
+
+	client := controlplane.New(srv.URL, "rnr_machine_whatever",
+		controlplane.WithHTTPClient(srv.Client()))
+
+	rep := newReporter(client, testLogger(), 10*time.Millisecond, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() { rep.run(ctx); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run() never returned; it is still retrying a credential that was refused")
+	}
+
+	// One heartbeat, refused, and then it stops. The final report on
+	// shutdown may add one more; anything beyond that is the old loop.
+	if n := calls.Load(); n > 2 {
+		t.Errorf("the control plane was called %d times, want it to stop after the refusal", n)
+	}
+	if !rep.stopped() {
+		t.Error("the reporter does not consider itself stopped")
 	}
 }

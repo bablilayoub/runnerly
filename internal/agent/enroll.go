@@ -170,9 +170,15 @@ func registrationFor(r state.Runner) controlplane.RegisterRequest {
 		OS:            runtime.GOOS,
 		Architecture:  runtime.GOARCH,
 		CPUCount:      runtime.NumCPU(),
-		Labels:        r.Labels,
-		Ephemeral:     r.Ephemeral,
-		AgentVersion:  version.Get().Short(),
+		// These two were declared, sent, stored and shown on the runner
+		// page, and never once set: the dashboard's Memory and Disk rows
+		// were always a dash. Unknown is still reported as 0 rather than
+		// guessed at, and still renders as a dash.
+		MemoryBytes:  memoryTotal(),
+		DiskBytes:    diskTotal(r.Dir),
+		Labels:       r.Labels,
+		Ephemeral:    r.Ephemeral,
+		AgentVersion: version.Get().Short(),
 	}
 }
 

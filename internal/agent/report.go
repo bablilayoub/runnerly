@@ -49,6 +49,9 @@ type reporter struct {
 	// lastToken is what was persisted, so the same rotation is not written
 	// on every heartbeat.
 	lastToken string
+	// refused is set when the control plane rejects the credential, which
+	// no amount of retrying fixes.
+	refused bool
 }
 
 // Runner statuses the agent reports.
@@ -197,8 +200,23 @@ func (r *reporter) run(ctx context.Context) {
 
 		case <-ticker.C:
 			r.heartbeat()
+			if r.stopped() {
+				// The credential was refused. Supervision continues — a
+				// control plane that will not talk to us is not a reason
+				// to stop running jobs — but there is nothing left to
+				// report to, so the loop ends instead of logging the same
+				// error every interval for as long as the agent lives.
+				return
+			}
 		}
 	}
+}
+
+// stopped reports whether reporting has given up for good.
+func (r *reporter) stopped() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refused
 }
 
 // flushEvents sends the event it was given plus anything else already queued.
@@ -269,10 +287,21 @@ func (r *reporter) heartbeat() {
 	}
 	if err != nil {
 		if errors.Is(err, controlplane.ErrUnauthorized) {
-			// Retrying will not help, so say so plainly and stop trying to
-			// dress it up as a transient failure.
-			r.log.Error("the control plane refused the machine token; reporting is stopping",
-				"event", "report_unauthorized", "error", err.Error())
+			// Retrying will not help. This used to say reporting was
+			// stopping and then return from the heartbeat only, so the
+			// ticker brought it straight back: the same error every
+			// interval, forever, in a log someone is meant to read. Now
+			// the claim is true.
+			r.mu.Lock()
+			already := r.refused
+			r.refused = true
+			r.mu.Unlock()
+
+			if !already {
+				r.log.Error("the control plane refused the machine token; reporting is stopping",
+					"event", "report_unauthorized", "error", err.Error(),
+					"hint", "the runner keeps running; enroll the machine again to restore reporting")
+			}
 			return
 		}
 		r.log.Warn("could not send a heartbeat",

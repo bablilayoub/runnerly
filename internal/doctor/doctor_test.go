@@ -26,7 +26,12 @@ func healthyEnv(t *testing.T, serverURL string) Env {
 		LookPath: func(file string) (string, error) {
 			return "/usr/bin/" + file, nil
 		},
-		Run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			// A healthy Linux machine has the ICU libraries GitHub's runner
+			// needs; without this the healthy case would warn about them.
+			if name == "ldconfig" {
+				return []byte("\tlibicuuc.so.74 (libc6,AArch64) => /usr/lib/libicuuc.so.74\n"), nil
+			}
 			return []byte("27.0.1\n"), nil
 		},
 		HTTPClient: serverURL2Client(serverURL),
@@ -518,6 +523,65 @@ func TestHumanBytes(t *testing.T) {
 	for value, want := range tests {
 		if got := humanBytes(value); got != want {
 			t.Errorf("humanBytes(%d) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+// TestRunnerRuntimeWarnsWithoutICU covers a failure found by registering a
+// runner in a bare ubuntu:24.04 container, which is what a fresh machine
+// actually looks like.
+//
+// GitHub's runner is a .NET program and config.sh will not start without
+// libicu. doctor said the machine was ready, and setup then downloaded the
+// runner, unpacked it, and failed on "Libicu's dependencies is missing for
+// Dotnet Core 6.0" — a message that names neither Runnerly nor the package
+// to install.
+func TestRunnerRuntimeWarnsWithoutICU(t *testing.T) {
+	env := Env{
+		GOOS:   "linux",
+		GOARCH: "amd64",
+		Run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			// ldconfig runs, and lists no ICU.
+			return []byte("\tlibc.so.6 (libc6,x86-64) => /lib/libc.so.6\n"), nil
+		},
+	}
+
+	c := checkRunnerRuntime(context.Background(), Options{Env: env})
+	if c.Status != StatusWarn {
+		t.Errorf("status = %q, want a warning", c.Status)
+	}
+	if !strings.Contains(c.Detail, "ICU") {
+		t.Errorf("the detail does not name what is missing: %q", c.Detail)
+	}
+	if c.Remedy == "" {
+		t.Error("a failing check with no remedy is a bug")
+	}
+	if !strings.Contains(c.Remedy, "libicu") {
+		t.Errorf("the remedy does not name the package: %q", c.Remedy)
+	}
+}
+
+func TestRunnerRuntimePassesWithICU(t *testing.T) {
+	env := Env{
+		GOOS:   "linux",
+		GOARCH: "amd64",
+		Run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("\tlibicuuc.so.74 (libc6,x86-64) => /usr/lib/libicuuc.so.74\n"), nil
+		},
+	}
+
+	if c := checkRunnerRuntime(context.Background(), Options{Env: env}); c.Status != StatusPass {
+		t.Errorf("status = %q, want a pass: %s", c.Status, c.Detail)
+	}
+}
+
+// Only Linux needs them separately, so everywhere else says so rather than
+// guessing.
+func TestRunnerRuntimeSkipsOffLinux(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		env := Env{GOOS: goos, GOARCH: "arm64"}
+		if c := checkRunnerRuntime(context.Background(), Options{Env: env}); c.Status != StatusSkip {
+			t.Errorf("%s: status = %q, want a skip", goos, c.Status)
 		}
 	}
 }

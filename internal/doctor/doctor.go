@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -131,6 +132,7 @@ func Run(ctx context.Context, opts Options) Report {
 		checkBinary(opts.Env, "curl", StatusWarn,
 			"Runnerly does not need curl, but many workflows assume it is present.",
 			"sudo apt-get update && sudo apt-get install -y curl"),
+		checkRunnerRuntime(ctx, opts),
 	}
 
 	dockerInstalled := checkDocker(opts)
@@ -223,6 +225,54 @@ func checkArch(goarch string) Check {
 	c.Status = StatusFail
 	c.Detail = fmt.Sprintf("%s is not an architecture GitHub publishes an Actions runner for", goarch)
 	c.Remedy = "Use an x86_64 or arm64 machine."
+	return c
+}
+
+// checkRunnerRuntime looks for the ICU libraries GitHub's runner needs.
+//
+// The runner is a .NET program, and .NET refuses to start without libicu
+// unless it is built to avoid it. A clean Debian or Ubuntu machine does not
+// have it, so `runner create` gets as far as downloading, unpacking and
+// calling config.sh before failing with a message about "Dotnet Core 6.0"
+// that says nothing about Runnerly:
+//
+//	Libicu's dependencies is missing for Dotnet Core 6.0
+//
+// That is a long way to go to find out, and it is the first thing a fresh
+// Ubuntu box hits. Found by registering a runner in a bare ubuntu:24.04
+// container, which is what a new machine actually looks like.
+//
+// It is a warning rather than a failure: the check reads the filesystem
+// looking for a shared library, which is a guess, and being wrong should
+// not stop a machine that works.
+func checkRunnerRuntime(ctx context.Context, opts Options) Check {
+	c := Check{Name: "runner runtime"}
+
+	if opts.Env.GOOS != "linux" {
+		c.Status = StatusSkip
+		c.Detail = "only Linux needs the ICU libraries separately."
+		return c
+	}
+
+	// ldconfig is the reliable answer where it exists; the glob is for
+	// images that do not ship it.
+	if out, err := opts.Env.Run(ctx, "ldconfig", "-p"); err == nil {
+		if strings.Contains(string(out), "libicuuc.so") {
+			c.Status = StatusPass
+			c.Detail = "the ICU libraries GitHub's runner needs are present."
+			return c
+		}
+	} else if found, globErr := filepath.Glob("/usr/lib/*/libicuuc.so*"); globErr == nil && len(found) > 0 {
+		c.Status = StatusPass
+		c.Detail = "the ICU libraries GitHub's runner needs are present."
+		return c
+	}
+
+	c.Status = StatusWarn
+	c.Detail = "the ICU libraries were not found. GitHub's runner is a .NET program\n" +
+		"and config.sh fails without them, after the download has already happened."
+	c.Remedy = "sudo apt-get update && sudo apt-get install -y libicu-dev\n" +
+		"# or, on the unpacked runner: sudo ./bin/installdependencies.sh"
 	return c
 }
 

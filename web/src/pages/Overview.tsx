@@ -40,9 +40,10 @@ export function Overview() {
 
       {runners.stale > 0 && (
         <p className="text-sm" style={{ color: 'var(--warn)' }}>
-          {runners.stale} runner{runners.stale === 1 ? '' : 's'} have not reported in over{' '}
-          {thresholds.stale_after_seconds}s. They are still counted as up until{' '}
-          {thresholds.offline_after_seconds}s.
+          {runners.stale} runner{runners.stale === 1 ? '' : 's'}{' '}
+          {runners.stale === 1 ? 'has' : 'have'} not reported in over{' '}
+          {thresholds.stale_after_seconds}s. {runners.stale === 1 ? 'It is' : 'They are'} still
+          counted as up until {thresholds.offline_after_seconds}s.
         </p>
       )}
 
