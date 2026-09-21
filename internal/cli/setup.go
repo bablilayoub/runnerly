@@ -124,10 +124,6 @@ func (s *setup) run(ctx context.Context) error {
 	if err := validateRunnerName(s.name); err != nil {
 		return err
 	}
-	if err := s.env.checkRunnerPolicy(ctx, s.client, s.cfg, s.target, s.allowPublic); err != nil {
-		return err
-	}
-
 	proceed, err := s.confirmPlan(found)
 	if err != nil {
 		return err
@@ -287,6 +283,11 @@ func (s *setup) ensureToken(ctx context.Context) error {
 func (s *setup) chooseScope(ctx context.Context) error {
 	target, err := s.env.resolveScope(s.scope, s.cfg, "")
 	if err == nil {
+		// Named outright, so there is no list to send anyone back to: the
+		// policy is a hard refusal here, exactly as in `runner create`.
+		if err := s.env.checkRunnerPolicy(ctx, s.client, s.cfg, target, s.allowPublic); err != nil {
+			return err
+		}
 		s.target = target
 		s.p.Pass("runner will join %s", target)
 		s.p.Println()
@@ -315,7 +316,7 @@ func (s *setup) chooseScope(ctx context.Context) error {
 			"Or name one directly with --repo owner/repo")
 	}
 
-	return s.pickRepository(repos)
+	return s.pickRepository(ctx, repos)
 }
 
 // pickRepository asks which repository the runner joins.
@@ -329,7 +330,7 @@ func (s *setup) chooseScope(ctx context.Context) error {
 // in the one command whose whole purpose is not making you look things up,
 // and it is what someone with a lot of repositories hits first. Typing
 // anything that is not a number now filters the list instead.
-func (s *setup) pickRepository(repos []github.Repository) error {
+func (s *setup) pickRepository(ctx context.Context, repos []github.Repository) error {
 	matches := repos
 
 	for attempt := 0; ; attempt++ {
@@ -380,23 +381,33 @@ func (s *setup) pickRepository(repos []github.Repository) error {
 				s.p.Println()
 				continue
 			}
-			target, err := github.ParseRepository(shown[n-1].FullName)
+			chosen, err := github.ParseRepository(shown[n-1].FullName)
 			if err != nil {
 				return err
 			}
-			s.target = target
-			s.p.Println()
+			ok, err := s.acceptScope(ctx, chosen)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
 			return nil
 
 		case strings.Contains(answer, "/"):
 			// A full owner/repo is an answer, not a search: someone who
 			// knows the name should not have to find it in a list.
-			target, err := github.ParseRepository(answer)
+			chosen, err := github.ParseRepository(answer)
 			if err != nil {
 				return err
 			}
-			s.target = target
-			s.p.Println()
+			ok, err := s.acceptScope(ctx, chosen)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
 			return nil
 
 		default:
@@ -406,6 +417,57 @@ func (s *setup) pickRepository(repos []github.Repository) error {
 			s.p.Println()
 		}
 	}
+}
+
+// acceptScope applies the security policy to a repository picked from the
+// list, and reports whether setup should go on with it.
+//
+// Picking a public repository used to end the command: the policy said to
+// pass --allow-public and start again, which meant going back through the
+// picker to reach the same choice. The refusal itself is right — a runner
+// on a public repository executes whatever a pull request asks of it — but
+// ending the wizard is not how to deliver it to someone who is standing
+// right there and can answer.
+//
+// So the warning is shown in full and the question is asked, defaulting to
+// no. It is the same decision --allow-public makes, made explicitly. What
+// does not change: a scope named on the command line is still refused
+// outright, and --yes still requires the flag, because neither of those has
+// anyone to ask.
+func (s *setup) acceptScope(ctx context.Context, scope github.Scope) (bool, error) {
+	err := s.env.checkRunnerPolicy(ctx, s.client, s.cfg, scope, s.allowPublic)
+	if err == nil {
+		s.target = scope
+		s.p.Println()
+		return true, nil
+	}
+
+	if !s.env.interactive || s.assumeYes {
+		return false, err
+	}
+
+	s.p.Println()
+	s.p.Warn("%s is a public repository", scope)
+	s.p.Detail("A self-hosted runner executes the code in a workflow. On a public\n" +
+		"repository, anyone who can get a workflow to run can run commands on\n" +
+		"this machine. See https://runnerly.dev/docs/security.")
+	s.p.Println()
+
+	ok, confirmErr := s.confirm(fmt.Sprintf("Register a runner on %s anyway?", scope))
+	if confirmErr != nil {
+		return false, confirmErr
+	}
+	if !ok {
+		s.p.Println()
+		s.p.Println("  Pick another, then.")
+		s.p.Println()
+		return false, nil
+	}
+
+	s.allowPublic = true
+	s.target = scope
+	s.p.Println()
+	return true, nil
 }
 
 // filterRepositories keeps the repositories whose name contains the query,

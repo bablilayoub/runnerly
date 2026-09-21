@@ -351,3 +351,108 @@ func TestSetupReAsksOnABadNumber(t *testing.T) {
 		t.Errorf("ran %v, want it to have carried on and registered once", commands)
 	}
 }
+
+// Picking a public repository from the list used to end the command and
+// tell you to start again with --allow-public — after you had already gone
+// through the picker to get there.
+//
+// The refusal is right; ending the wizard is not the way to deliver it to
+// someone who is standing there and can answer. Declining sends you back to
+// the list.
+func TestSetupOffersThePublicRepositoryChoiceInPlace(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandler(t, false)), // acme/widgets is public
+		withRunnerEnv(&commands),
+		withInteractive(),
+		// Pick it, agree to the warning, then confirm the plan.
+		withStdin("1\ny\ny\n"),
+	}
+
+	out, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--name", "runnerly-01", "--dir", preUnpacked(t), "--skip-doctor")
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "is a public repository") {
+		t.Errorf("the warning was not shown:\n%s", out)
+	}
+	if !strings.Contains(out, "anyone who can get a workflow to run") {
+		t.Errorf("the warning did not say why it matters:\n%s", out)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("ran %v, want config.sh once after agreeing", commands)
+	}
+}
+
+// Declining must not register anything, and must not end the command
+// either: it goes back to the list.
+func TestSetupDecliningAPublicRepositoryReturnsToTheList(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandler(t, false)),
+		withRunnerEnv(&commands),
+		withInteractive(),
+		// Pick it, decline, then give nothing and let it stop.
+		withStdin("1\nn\n\n"),
+	}
+
+	out, _, _ := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--name", "runnerly-01", "--dir", preUnpacked(t), "--skip-doctor")
+
+	if len(commands) != 0 {
+		t.Errorf("declining still registered: %v", commands)
+	}
+	if !strings.Contains(out, "Pick another") {
+		t.Errorf("it did not offer the list again:\n%s", out)
+	}
+}
+
+// The guard must not be softer than it was. A scope named on the command
+// line has no list to go back to, so it is still refused outright — asking
+// would be inventing a prompt where the operator already stated intent.
+func TestSetupStillRefusesAPublicRepositoryNamedOutright(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandler(t, false)),
+		withRunnerEnv(&commands),
+		withInteractive(),
+		withStdin("y\ny\ny\n"), // would agree to anything it was asked
+	}
+
+	_, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--repo", "acme/widgets", "--name", "runnerly-01",
+		"--dir", preUnpacked(t), "--skip-doctor")
+	if err == nil {
+		t.Fatal("a public repository named with --repo was accepted")
+	}
+	if !strings.Contains(err.Error(), "public repository") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(commands) != 0 {
+		t.Errorf("it registered anyway: %v", commands)
+	}
+}
+
+// And --yes, which has nobody to ask, still requires the flag.
+func TestSetupWithYesStillRequiresAllowPublic(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	_, _, err := runCLI(t, setupOptions(t, false, &commands),
+		"--config", cfg, "--token", "t",
+		"setup", "--repo", "acme/widgets", "--yes", "--skip-doctor")
+	if err == nil {
+		t.Fatal("--yes accepted a public repository without --allow-public")
+	}
+	if len(commands) != 0 {
+		t.Errorf("it registered anyway: %v", commands)
+	}
+}
