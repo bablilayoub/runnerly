@@ -34,9 +34,10 @@ copies three binaries onto your PATH. Then:
 runnerly setup
 ```
 
-**This needs a published release, and there is not one yet.** The release
-workflow builds and uploads the archives when a `v*` tag is pushed; until
-that has happened, build from source.
+**This needs a published release.** The release workflow builds and uploads
+the archives, with a `SHA256SUMS` beside them, when a `v*` tag is pushed. If
+the installer cannot find a release, or the repository is private to you,
+build from source instead.
 
 What the installer will not do: run `sudo` on your behalf, write outside the
 install directory, register a runner, or start anything. If `/usr/local/bin`

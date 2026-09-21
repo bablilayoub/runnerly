@@ -56,8 +56,8 @@ the token through `RUNNERLY_GITHUB_TOKEN`.
 
 ## Install
 
-The installer needs a published release, and there is not one yet, so for now
-build from source:
+The installer needs a published release. Without one — or on a repository
+that is private to you — build from source:
 
 ```bash
 git clone https://github.com/bablilayoub/runnerly.git

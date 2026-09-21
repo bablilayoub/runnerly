@@ -67,10 +67,10 @@ box, and a provisioning script can skip the wizard:
 runnerly setup --repo owner/repo --yes   # prompts for nothing, fails instead
 ```
 
-> **The installer needs a published release**, and there is not one yet.
-> `.github/workflows/release.yml` builds and publishes the archives and their
-> checksums when a `v*` tag is pushed; until then, and while this repository
-> is private, build from source.
+> **The installer needs a published release.** If it cannot find one, either
+> none has been published yet or this repository is private to you — build
+> from source in the meantime. Pushing a `v*` tag publishes the archives and
+> their checksums.
 
 ### From source
 
