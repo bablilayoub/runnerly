@@ -1,13 +1,13 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package machine
 
 import "context"
 
-// MemoryTotal reports unknown, because memory has a source on Linux and
-// macOS and nowhere else Runnerly builds for. The other unixes have
-// sources nobody has run this against, and a number arrived at by reading
-// documentation is exactly the kind that turns out to mean something else.
+// MemoryTotal reports unknown. Memory and processor have a source on
+// Linux, macOS and Windows; the other unixes have sources nobody has run
+// this against, and a number arrived at by reading documentation is
+// exactly the kind that turns out to mean something else.
 //
 // Zero and false mean unknown here, and every surface renders that as a
 // dash rather than as a machine with no memory.

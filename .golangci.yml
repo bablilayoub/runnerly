@@ -43,6 +43,15 @@ linters:
           - errcheck
           - bodyclose
 
+      # Calling into kernel32 means passing pointers as uintptr, which is
+      # what unsafe.Pointer is for and what G103 flags on sight. The file
+      # is nothing but syscall bindings, so the finding is on every line
+      # of it and says nothing about any of them.
+      - path: 'machine_windows\.go'
+        linters:
+          - gosec
+        text: 'G103'
+
 formatters:
   enable:
     - gofmt
