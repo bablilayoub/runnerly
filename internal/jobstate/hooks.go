@@ -50,6 +50,27 @@ const hookScript = `#!/bin/sh
 %s agent hook %s --state %s --config %s || true
 `
 
+// batchHookScript is the Windows body of each hook.
+//
+// The runner is a .NET program and starts a hook the way the operating
+// system starts anything: a shell script is not a program on Windows, so
+// this is a .cmd that does the same one thing the shell version does.
+//
+// `exit /b 0` is the batch equivalent of the `|| true` above, and matters
+// for the same reason: the runner fails the job if a hook exits non-zero,
+// and Runnerly's bookkeeping going wrong must never fail somebody's build.
+const batchHookScript = `@echo off
+rem Installed by Runnerly. Do not edit: it is rewritten whenever the agent
+rem starts.
+rem
+rem GitHub's runner runs this %s each job. It records what the runner is
+rem doing so the agent can report it, and cleans up Docker afterwards.
+rem
+rem A failure here must not fail the job, which is what the exit is for.
+%s agent hook %s --state %s --config %s
+exit /b 0
+`
+
 // InstallHooks writes the hook scripts into a runner directory and returns
 // where they went.
 //
@@ -57,12 +78,15 @@ const hookScript = `#!/bin/sh
 // have moved, the configuration path may have changed, and a stale hook
 // pointing at neither would silently stop recording anything.
 func InstallHooks(runnerDir, binary, configPath string) (Hooks, error) {
-	if runtime.GOOS == "windows" {
-		// The hook would need to be a .cmd, and nothing else in Runnerly
-		// supports Windows runners yet. Saying so beats writing a shell
-		// script the runner cannot execute.
-		return Hooks{}, fmt.Errorf("job hooks are not implemented for Windows runners")
-	}
+	return installHooks(runtime.GOOS, runnerDir, binary, configPath)
+}
+
+// installHooks takes the platform as an argument so both shapes can be
+// tested from either one. The Windows hook is a .cmd and cannot be
+// executed here to check it; what can be checked is that it is written,
+// and that a path with a character batch treats specially comes out of it
+// still meaning the same path.
+func installHooks(goos, runnerDir, binary, configPath string) (Hooks, error) {
 	if binary == "" {
 		return Hooks{}, fmt.Errorf("the hooks need the path to the runnerly binary")
 	}
@@ -72,10 +96,15 @@ func InstallHooks(runnerDir, binary, configPath string) (Hooks, error) {
 		return Hooks{}, fmt.Errorf("create %s: %w", dir, err)
 	}
 
+	script, quote, suffix := hookScript, shellQuote, ".sh"
+	if goos == "windows" {
+		script, quote, suffix = batchHookScript, batchQuote, ".cmd"
+	}
+
 	statePath := Path(runnerDir)
 	hooks := Hooks{
-		Started:   filepath.Join(dir, "job-started.sh"),
-		Completed: filepath.Join(dir, "job-completed.sh"),
+		Started:   filepath.Join(dir, "job-started"+suffix),
+		Completed: filepath.Join(dir, "job-completed"+suffix),
 	}
 
 	for name, path := range map[string]string{"started": hooks.Started, "completed": hooks.Completed} {
@@ -83,12 +112,13 @@ func InstallHooks(runnerDir, binary, configPath string) (Hooks, error) {
 		if name == "completed" {
 			when = "after"
 		}
-		body := fmt.Sprintf(hookScript, when,
-			shellQuote(binary), name, shellQuote(statePath), shellQuote(configPath))
+		body := fmt.Sprintf(script, when,
+			quote(binary), name, quote(statePath), quote(configPath))
 
 		// 0700, not 0600: the runner has to execute this. It is owner-only,
 		// which is what matters — it runs as the runner's user and nobody
-		// else may write to something that will be executed.
+		// else may write to something that will be executed. Windows
+		// ignores the mode and decides by the .cmd extension.
 		if err := os.WriteFile(path, []byte(body), 0o700); err != nil { //nolint:gosec // G306: a hook must be executable
 			return Hooks{}, fmt.Errorf("write %s: %w", path, err)
 		}
@@ -99,6 +129,20 @@ func InstallHooks(runnerDir, binary, configPath string) (Hooks, error) {
 // shellQuote makes a path safe inside single quotes in the hook script.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// batchQuote makes a path safe as one argument in a .cmd file.
+//
+// Double quotes handle spaces and the characters cmd treats as operators.
+// A percent sign is the one they do not handle: cmd expands %NAME% inside
+// quotes as happily as outside, and %USERPROFILE% is a perfectly legal
+// thing to find in a Windows directory name. Doubling it is how a batch
+// file writes a literal one.
+//
+// A double quote cannot appear in a Windows path at all, so there is
+// nothing to escape and nothing to smuggle in through one.
+func batchQuote(s string) string {
+	return `"` + strings.ReplaceAll(s, "%", "%%") + `"`
 }
 
 // FromEnvironment reads what the runner tells a hook about the current job.

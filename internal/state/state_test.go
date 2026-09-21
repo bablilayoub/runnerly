@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,10 @@ func sample(name string) Runner {
 }
 
 func TestPathSitsBesideConfig(t *testing.T) {
-	if got := Path("/etc/runnerly/config.yaml"); got != "/etc/runnerly/runners.yaml" {
-		t.Errorf("Path() = %q", got)
+	config := filepath.Join("etc", "runnerly", "config.yaml")
+	want := filepath.Join("etc", "runnerly", FileName)
+	if got := Path(config); got != want {
+		t.Errorf("Path(%q) = %q, want %q", config, got, want)
 	}
 }
 
@@ -53,7 +56,11 @@ func TestPutGetRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	// Windows has no permission bits: Go synthesizes a mode from the
+	// read-only attribute and everything writable reads as 0666. What
+	// protects a file there is the ACL it inherits from its directory,
+	// which is a different mechanism and not one this asserts.
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o600 {
 		t.Errorf("state permissions = %o, want 600", perm)
 	}
 

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -14,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -160,7 +162,10 @@ func TestExtract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable bit. Go synthesizes a mode from the
+	// read-only attribute, so everything writable reads as 0666 and this
+	// would be asserting that Windows is unix.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("config.sh is not executable: %o", info.Mode().Perm())
 	}
 
@@ -213,6 +218,9 @@ func TestExtractRejectsPathTraversal(t *testing.T) {
 }
 
 func TestExtractStripsGroupAndOtherWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits; a file's protection is its ACL")
+	}
 	dest := t.TempDir()
 	data := makeArchive(t, entry{name: "loose.sh", body: "x", mode: 0o777})
 	if err := Extract(writeArchive(t, data), dest); err != nil {
@@ -573,5 +581,160 @@ func TestDefaultLabelsDoNotDuplicatePlatform(t *testing.T) {
 				t.Errorf("labels = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// makeZip builds a zip archive in memory, the shape GitHub ships for
+// Windows.
+func makeZip(t *testing.T, entries ...entry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+
+	for _, e := range entries {
+		header := &zip.FileHeader{Name: e.name, Method: zip.Deflate}
+		mode := os.FileMode(e.mode)
+		if strings.HasSuffix(e.name, "/") {
+			mode |= os.ModeDir
+		}
+		if e.typeflag == tar.TypeSymlink {
+			mode |= os.ModeSymlink
+		}
+		header.SetMode(mode)
+
+		w, err := zw.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := e.body
+		if e.typeflag == tar.TypeSymlink {
+			body = e.linkname
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func writeZip(t *testing.T, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "actions-runner-win-x64-2.337.0.zip")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// GitHub ships a zip for Windows and a tar.gz for everything else, so
+// Extract has to read both. Which one it is comes from the name GitHub
+// gave the file, not from the platform doing the unpacking: a release is
+// downloaded by name, and the two have to agree.
+func TestExtractReadsAZip(t *testing.T) {
+	data := makeZip(t,
+		entry{name: "config.cmd", body: "@echo off\n", mode: 0o755},
+		entry{name: "bin/", mode: 0o755},
+		entry{name: "bin/Runner.Listener.exe", body: "binary", mode: 0o755},
+		entry{name: "docs/readme.txt", body: "hello", mode: 0o644},
+	)
+	dest := t.TempDir()
+
+	if err := Extract(writeZip(t, data), dest); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(dest, "docs", "readme.txt"))
+	if err != nil || string(body) != "hello" {
+		t.Errorf("nested file = %q, %v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "bin", "Runner.Listener.exe")); err != nil {
+		t.Errorf("the runner binary is missing: %v", err)
+	}
+}
+
+// The traversal guard is the same one, but a zip reaches it by a
+// different path, and "it is shared code" is how a hole gets left open.
+func TestExtractZipRejectsPathTraversal(t *testing.T) {
+	cases := []struct {
+		name    string
+		entries []entry
+		want    string
+	}{
+		{"parent directory", []entry{{name: "../escaped.cmd", body: "x"}}, "outside"},
+		{"absolute path", []entry{{name: "/Windows/System32/evil.dll", body: "x"}}, "absolute path"},
+		{"nested traversal", []entry{{name: "bin/../../escaped", body: "x"}}, "outside"},
+		{
+			"symlink",
+			[]entry{{name: "evil", typeflag: tar.TypeSymlink, linkname: "../../../../etc/passwd"}},
+			"symlink",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			dest := t.TempDir()
+			err := Extract(writeZip(t, makeZip(t, tt.entries...)), dest)
+			if err == nil {
+				t.Fatal("Extract() accepted an entry that escapes the destination")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// A zip written by a Windows tool records no unix mode at all. Taking it
+// literally would create files with mode 0.
+func TestExtractZipWithNoRecordedModes(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("config.cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("@echo off\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := t.TempDir()
+	if err := Extract(writeZip(t, buf.Bytes()), dest); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dest, "config.cmd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o400 == 0 {
+		t.Errorf("mode = %o, which nobody can read", info.Mode().Perm())
+	}
+}
+
+func TestExtractZipStripsGroupAndOtherWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits; a file's protection is its ACL")
+	}
+	dest := t.TempDir()
+	if err := Extract(writeZip(t, makeZip(t, entry{name: "loose.cmd", body: "x", mode: 0o777})), dest); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dest, "loose.cmd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		t.Errorf("mode = %o, want no group or other write", info.Mode().Perm())
+	}
+}
+
+func TestExtractRejectsAZipThatIsNotOne(t *testing.T) {
+	if err := Extract(writeZip(t, []byte("not a zip")), t.TempDir()); err == nil {
+		t.Fatal("Extract() accepted a .zip that is not one")
 	}
 }

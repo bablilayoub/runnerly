@@ -170,8 +170,10 @@ type Options struct {
 	Start StartFunc
 	// OnEvent receives every state change. It must not block for long.
 	OnEvent func(Event)
-	// Now reads the clock. Nil uses time.Now; tests replace it so the
-	// restart window can be exercised without waiting an hour.
+	// Now reads the clock for everything the supervisor measures: how
+	// long a process ran, and how much of the restart budget is left.
+	// Nil uses time.Now; tests replace it so both can be exercised
+	// without waiting an hour.
 	Now func() time.Time
 }
 
@@ -241,10 +243,17 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 		s.setCurrent(proc)
 		s.emit(Event{Kind: EventStarted, Attempt: attempt, PID: proc.PID()})
-		startedAt := time.Now()
+		// One clock. Measuring uptime with time.Now while the restart
+		// budget uses s.opts.Now left half of this loop untestable and
+		// the other half dependent on timer granularity: a fake process
+		// that exits immediately reported an uptime of exactly zero on
+		// Windows, ResetAfter never forgave anything, and a supervisor
+		// that should have run for a simulated fortnight gave up after
+		// five restarts.
+		startedAt := s.opts.Now()
 
 		exitErr, shutdown := s.awaitExit(ctx, proc)
-		uptime := time.Since(startedAt)
+		uptime := s.opts.Now().Sub(startedAt)
 		asked := s.takeRestartFlag()
 		s.setCurrent(nil)
 

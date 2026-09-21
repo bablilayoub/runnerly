@@ -220,3 +220,67 @@ func TestFromEnvironmentReadsWhatTheRunnerExports(t *testing.T) {
 		t.Errorf("state = %+v", state)
 	}
 }
+
+// The Windows hook is a .cmd, because a shell script is not a program on
+// Windows and the runner starts a hook the way the system starts anything.
+func TestInstallHooksWritesBatchOnWindows(t *testing.T) {
+	dir := t.TempDir()
+
+	hooks, err := installHooks("windows", dir, `C:\Program Files\runnerly\runnerly.exe`, "")
+	if err != nil {
+		t.Fatalf("installHooks: %v", err)
+	}
+
+	if filepath.Ext(hooks.Started) != ".cmd" || filepath.Ext(hooks.Completed) != ".cmd" {
+		t.Errorf("hooks are %q and %q, want .cmd files", hooks.Started, hooks.Completed)
+	}
+
+	body, err := os.ReadFile(hooks.Started) //nolint:gosec // a path this test made
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"@echo off",
+		`"C:\Program Files\runnerly\runnerly.exe" agent hook started`,
+		// The runner fails the job if a hook exits non-zero, so it must not.
+		"exit /b 0",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the hook is missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "|| true") {
+		t.Errorf("a shell idiom leaked into the batch hook:\n%s", text)
+	}
+}
+
+// cmd expands %NAME% inside double quotes as happily as outside, and a
+// Windows directory name may legally contain a percent sign. Left alone,
+// the hook would be handed a path with a chunk of it replaced by an
+// environment variable, or by nothing.
+func TestBatchQuoteDoublesPercentSigns(t *testing.T) {
+	got := batchQuote(`C:\builds\100%done\%USERNAME%`)
+	if !strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, `"`) {
+		t.Errorf("batchQuote() = %s, want it quoted", got)
+	}
+	// Three in, six out, and none of them left able to expand.
+	if strings.Count(got, "%") != 6 {
+		t.Errorf("batchQuote() = %s, want every percent doubled", got)
+	}
+	if got != `"C:\builds\100%%done\%%USERNAME%%"` {
+		t.Errorf("batchQuote() = %s", got)
+	}
+}
+
+func TestInstallHooksStillWritesShellElsewhere(t *testing.T) {
+	dir := t.TempDir()
+
+	hooks, err := installHooks("linux", dir, "/usr/local/bin/runnerly", "")
+	if err != nil {
+		t.Fatalf("installHooks: %v", err)
+	}
+	if filepath.Ext(hooks.Started) != ".sh" {
+		t.Errorf("hook is %q, want a .sh", hooks.Started)
+	}
+}

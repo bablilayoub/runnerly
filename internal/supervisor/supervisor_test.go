@@ -23,6 +23,8 @@ type fakeProcess struct {
 	// onStop runs when Stop is called. A process that honors SIGTERM exits;
 	// one that ignores it does not, which is how the kill path is tested.
 	onStop func(*fakeProcess)
+	// beforeWait advances a test clock as the process ends.
+	beforeWait func()
 }
 
 func newFakeProcess(pid int) *fakeProcess {
@@ -32,6 +34,13 @@ func newFakeProcess(pid int) *fakeProcess {
 // exitsWith pre-programs an exit, so Wait returns at once.
 func (f *fakeProcess) exitsWith(err error) *fakeProcess {
 	f.exitCh <- err
+	return f
+}
+
+// ranFor makes Wait advance a test clock before returning, so the process
+// has an uptime rather than the zero a fake would otherwise report.
+func (f *fakeProcess) ranFor(advance func()) *fakeProcess {
+	f.beforeWait = advance
 	return f
 }
 
@@ -51,8 +60,13 @@ func (f *fakeProcess) finish(err error) {
 	f.exitCh <- err
 }
 
-func (f *fakeProcess) Wait() error { return <-f.exitCh }
-func (f *fakeProcess) PID() int    { return f.pid }
+func (f *fakeProcess) Wait() error {
+	if f.beforeWait != nil {
+		f.beforeWait()
+	}
+	return <-f.exitCh
+}
+func (f *fakeProcess) PID() int { return f.pid }
 
 func (f *fakeProcess) Stop() error {
 	f.mu.Lock()
@@ -670,13 +684,16 @@ func TestSpacedRestartsDoNotExhaustTheBudget(t *testing.T) {
 		},
 		Start: func(ProcessOptions) (Process, error) {
 			n := starts.Add(1)
-			// A day between failures: well outside the window every time.
-			now = now.Add(24 * time.Hour)
+			// Each one runs for a day and then fails: an uptime well past
+			// ResetAfter, and a gap well outside the window. The clock
+			// advances as the process ends rather than as it starts,
+			// because uptime is measured from the start.
+			aDay := func() { now = now.Add(24 * time.Hour) }
 			if n >= 20 {
 				// Stops failing: this one just runs until the test ends.
 				return newFakeProcess(int(n)).honorsStop(), nil
 			}
-			return newFakeProcess(int(n)).exitsWith(errors.New("occasional")), nil
+			return newFakeProcess(int(n)).ranFor(aDay).exitsWith(errors.New("occasional")), nil
 		},
 	})
 	if err != nil {

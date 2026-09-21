@@ -2,6 +2,7 @@ package runner
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -16,12 +17,24 @@ import (
 // under this, so the limit only ever catches a malformed or hostile archive.
 const maxEntrySize = 2 << 30 // 2 GiB
 
-// Extract unpacks a gzip-compressed tar archive into dest.
+// Extract unpacks a runner release into dest.
+//
+// GitHub ships a gzip-compressed tar for Linux and macOS and a zip for
+// Windows, so which one this is comes from the name GitHub gave it rather
+// than from the platform Runnerly is running on — a release is downloaded
+// by name and the two must agree.
 //
 // Every entry is resolved against dest and rejected if it escapes, including
 // symlink targets. An archive that unpacks outside the directory it was told
 // to use is treated as hostile, not as a quirk to work around.
 func Extract(archive, dest string) error {
+	if strings.HasSuffix(strings.ToLower(archive), ".zip") {
+		return extractZip(archive, dest)
+	}
+	return extractTarGz(archive, dest)
+}
+
+func extractTarGz(archive, dest string) error {
 	file, err := os.Open(archive) //nolint:gosec // archive is a path Runnerly just wrote
 	if err != nil {
 		return fmt.Errorf("open %s: %w", archive, err)
@@ -166,4 +179,84 @@ func entryMode(h *tar.Header, fallback os.FileMode) os.FileMode {
 		return fallback
 	}
 	return mode &^ 0o022
+}
+
+// extractZip unpacks a zip archive into dest, with the same guarantees
+// extractTarGz gives.
+//
+// Zip has no symlink or hard-link entry type of its own — the unix
+// extensions encode one in the mode bits — and the runner's Windows
+// release contains neither. One is refused rather than followed: a link
+// nobody expects in an archive nobody signs is not something to be
+// creative about.
+func extractZip(archive, dest string) error {
+	reader, err := zip.OpenReader(archive)
+	if err != nil {
+		return fmt.Errorf("read %s as zip: %w", archive, err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	root, err := filepath.Abs(dest)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", dest, err)
+	}
+
+	for _, entry := range reader.File {
+		target, err := safeJoin(root, entry.Name)
+		if err != nil {
+			return fmt.Errorf("%s: %w", archive, err)
+		}
+
+		mode := entry.Mode()
+		switch {
+		case entry.FileInfo().IsDir():
+			if err := os.MkdirAll(target, zipMode(mode, 0o750)); err != nil {
+				return fmt.Errorf("create directory %s: %w", target, err)
+			}
+
+		case mode&os.ModeSymlink != 0:
+			return fmt.Errorf("%s: entry %s is a symlink, which a runner release does not contain",
+				archive, entry.Name)
+
+		case mode.IsRegular():
+			size := entry.FileInfo().Size()
+			if size > maxEntrySize {
+				return fmt.Errorf("%s: entry %s is %d bytes, which is implausible for a runner release",
+					archive, entry.Name, size)
+			}
+			if err := copyZipEntry(entry, target, zipMode(mode, 0o600), size); err != nil {
+				return err
+			}
+
+		default:
+			// Devices and the like have no business in a runner release.
+			continue
+		}
+	}
+	return nil
+}
+
+func copyZipEntry(entry *zip.File, target string, mode os.FileMode, size int64) error {
+	r, err := entry.Open()
+	if err != nil {
+		return fmt.Errorf("read %s from the archive: %w", entry.Name, err)
+	}
+	defer func() { _ = r.Close() }()
+
+	return writeFile(target, r, mode, size)
+}
+
+// zipMode keeps a zip's recorded permissions when it has any, with the
+// same group and other write bits stripped that a tar entry gets.
+//
+// A zip written on Windows records no unix mode at all, which arrives here
+// as zero and would otherwise create files nobody can read. The runner's
+// own release does carry modes, so its scripts stay executable; the
+// fallback is for everything else.
+func zipMode(mode os.FileMode, fallback os.FileMode) os.FileMode {
+	perm := mode.Perm()
+	if perm == 0 {
+		return fallback
+	}
+	return perm &^ 0o022
 }
