@@ -21,10 +21,10 @@ import (
 	"github.com/bablilayoub/runnerly/internal/ui"
 )
 
-// maxPickerRepositories bounds the repository picker. A list longer than a
-// screen is not a picker, it is a wall, so past this many the operator is
-// asked to narrow it with --repo instead.
-const maxPickerRepositories = 30
+// maxPickerRepositories is how many repositories the picker shows at once.
+// A list longer than a screen is not a picker, it is a wall — so the rest
+// are behind a search rather than behind an error.
+const maxPickerRepositories = 20
 
 func newSetupCommand(e *env) *cobra.Command {
 	var (
@@ -93,8 +93,11 @@ type setup struct {
 
 	cfg        config.Config
 	configPath string
-	target     github.Scope
-	client     *github.Client
+	// in is the buffered reader every question shares, so one prompt does
+	// not swallow the answer to the next.
+	in     *bufio.Reader
+	target github.Scope
+	client *github.Client
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -299,50 +302,136 @@ func (s *setup) chooseScope(ctx context.Context) error {
 			"Pass --repo owner/repo or --org login")
 	}
 
-	s.p.Println("Which repository should this runner serve?")
-	s.p.Println()
-
 	repos, err := s.client.ListRepositories(ctx, github.ListRepositoriesOptions{
 		AdminOnly: true,
-		Limit:     maxPickerRepositories + 1,
+		Limit:     github.DefaultRepositoryLimit,
 	})
 	if err != nil {
 		return err
 	}
-	switch {
-	case len(repos) == 0:
+	if len(repos) == 0 {
 		return errors.New("this token cannot administer any repository, so it cannot register a runner.\n" +
 			"A classic token needs the `repo` scope; a fine-grained one needs administration access.\n" +
 			"Or name one directly with --repo owner/repo")
-	case len(repos) > maxPickerRepositories:
-		return fmt.Errorf("this token can administer more than %d repositories, which is too many to list.\n"+
-			"Name the one you want: runnerly setup --repo owner/repo", maxPickerRepositories)
 	}
 
-	for i, r := range repos {
-		visibility := "private"
-		if !r.Private {
-			visibility = "public"
+	return s.pickRepository(repos)
+}
+
+// pickRepository asks which repository the runner joins.
+//
+// GitHub returns them most recently pushed first, which is the best guess
+// available at what someone is setting a runner up for, so the first screen
+// is simply the top of that list.
+//
+// An account with hundreds of repositories used to be refused here: the
+// picker gave up and told the operator to pass --repo. That is a dead end
+// in the one command whose whole purpose is not making you look things up,
+// and it is what someone with a lot of repositories hits first. Typing
+// anything that is not a number now filters the list instead.
+func (s *setup) pickRepository(repos []github.Repository) error {
+	matches := repos
+
+	for attempt := 0; ; attempt++ {
+		if len(matches) == 0 {
+			s.p.Println("  Nothing matched. Showing everything again.")
+			s.p.Println()
+			matches = repos
 		}
-		s.p.Printf("  %2d  %-44s %s\n", i+1, r.FullName, visibility)
-	}
-	s.p.Println()
 
-	choice, err := s.ask(fmt.Sprintf("  Number [1-%d]: ", len(repos)))
-	if err != nil {
-		return err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(choice))
-	if err != nil || n < 1 || n > len(repos) {
-		return fmt.Errorf("%q is not one of the numbers listed", strings.TrimSpace(choice))
-	}
+		shown := matches
+		if len(shown) > maxPickerRepositories {
+			shown = shown[:maxPickerRepositories]
+		}
 
-	s.target, err = github.ParseRepository(repos[n-1].FullName)
-	if err != nil {
-		return err
+		if attempt == 0 {
+			s.p.Println("Which repository should this runner serve?")
+			s.p.Println()
+		}
+
+		for i, r := range shown {
+			visibility := "private"
+			if !r.Private {
+				visibility = "public"
+			}
+			s.p.Printf("  %2d  %-44s %s\n", i+1, r.FullName, visibility)
+		}
+		if len(matches) > len(shown) {
+			s.p.Dim("  ... and %d more. Type part of a name to narrow it.",
+				len(matches)-len(shown))
+		}
+		s.p.Println()
+
+		answer, err := s.ask(fmt.Sprintf("  Number [1-%d], or type to search: ", len(shown)))
+		if err != nil {
+			return err
+		}
+		answer = strings.TrimSpace(answer)
+
+		switch {
+		case answer == "":
+			return errors.New("nothing was chosen")
+
+		case isNumber(answer):
+			n, _ := strconv.Atoi(answer)
+			if n < 1 || n > len(shown) {
+				s.p.Println()
+				s.p.Warn("%d is not one of the numbers listed", n)
+				s.p.Println()
+				continue
+			}
+			target, err := github.ParseRepository(shown[n-1].FullName)
+			if err != nil {
+				return err
+			}
+			s.target = target
+			s.p.Println()
+			return nil
+
+		case strings.Contains(answer, "/"):
+			// A full owner/repo is an answer, not a search: someone who
+			// knows the name should not have to find it in a list.
+			target, err := github.ParseRepository(answer)
+			if err != nil {
+				return err
+			}
+			s.target = target
+			s.p.Println()
+			return nil
+
+		default:
+			matches = filterRepositories(repos, answer)
+			s.p.Println()
+			s.p.Printf("  %d matching %q\n", len(matches), answer)
+			s.p.Println()
+		}
 	}
-	s.p.Println()
-	return nil
+}
+
+// filterRepositories keeps the repositories whose name contains the query,
+// case-insensitively, in the order GitHub returned them.
+func filterRepositories(repos []github.Repository, query string) []github.Repository {
+	query = strings.ToLower(query)
+
+	out := make([]github.Repository, 0, len(repos))
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), query) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func isNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // confirmPlan states every change before any of them happens.
@@ -367,7 +456,7 @@ func (s *setup) confirmPlan(configFound bool) (bool, error) {
 	if s.assumeYes {
 		return true, nil
 	}
-	return confirm(s.env.in, s.env.out, s.env.interactive, "Go ahead?")
+	return s.confirm("Go ahead?")
 }
 
 // plannedLabels is what the runner will actually register with. It goes
@@ -471,13 +560,48 @@ func (s *setup) finish() {
 	s.p.Println()
 }
 
+// confirm asks a yes/no question through the same reader every other
+// prompt uses.
+//
+// It deliberately does not call the package-level confirm(): that builds a
+// reader of its own, and a second reader over the same stdin loses
+// whatever the first buffered past its newline. The wizard asks more than
+// one question, so it cannot afford that — the answer to the plan was
+// being swallowed by the repository picker's read-ahead.
+func (s *setup) confirm(prompt string) (bool, error) {
+	if !s.env.interactive {
+		return false, fmt.Errorf("%s\nThere is no terminal to confirm on.\n"+
+			"Re-run with --yes if you are sure", prompt)
+	}
+
+	answer, err := s.ask(prompt + " [y/N]: ")
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
 // ask reads one visible line. Secrets go through ui.ReadSecret instead.
+//
+// The reader is kept on the struct rather than built per call. bufio reads
+// ahead, so a fresh reader each time throws away whatever the last one
+// buffered past the newline — which is invisible for a single question and
+// eats input the moment anything asks twice, as the repository search does.
 func (s *setup) ask(prompt string) (string, error) {
 	if !s.env.interactive {
 		return "", errors.New("there is no terminal to ask on")
 	}
+	if s.in == nil {
+		s.in = bufio.NewReader(s.env.in)
+	}
+
 	fmt.Fprint(s.env.out, prompt)
-	line, err := bufio.NewReader(s.env.in).ReadString('\n')
+	line, err := s.in.ReadString('\n')
 	if err != nil && !errors.Is(err, os.ErrClosed) && line == "" {
 		return "", fmt.Errorf("read answer: %w", err)
 	}

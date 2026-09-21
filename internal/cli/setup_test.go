@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,10 @@ import (
 // whether the repository is private, a registration token, and the download
 // listing.
 func setupHandler(t *testing.T, private bool) http.HandlerFunc {
+	return setupHandlerWith(t, private, false)
+}
+
+func setupHandlerWith(t *testing.T, private, manyRepos bool) http.HandlerFunc {
 	t.Helper()
 	create := createHandler(t, private)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -24,6 +29,23 @@ func setupHandler(t *testing.T, private bool) http.HandlerFunc {
 			_, _ = w.Write([]byte(`{"login":"octocat"}`))
 		case "/user/repos":
 			w.Header().Set("Content-Type", "application/json")
+			if manyRepos {
+				// More than the picker shows at once, which is the case
+				// that used to be refused outright.
+				var b strings.Builder
+				b.WriteString("[")
+				for i := 0; i < 60; i++ {
+					if i > 0 {
+						b.WriteString(",")
+					}
+					fmt.Fprintf(&b, `{"full_name":"acme/filler-%d","name":"filler-%d","private":true,`+
+						`"owner":{"login":"acme"},"permissions":{"admin":true}}`, i, i)
+				}
+				b.WriteString(`,{"full_name":"acme/widgets","name":"widgets","private":true,` +
+					`"owner":{"login":"acme"},"permissions":{"admin":true}}]`)
+				_, _ = w.Write([]byte(b.String()))
+				return
+			}
 			_, _ = w.Write([]byte(`[
 				{"full_name":"acme/widgets","name":"widgets","private":true,
 				 "owner":{"login":"acme"},"permissions":{"admin":true}},
@@ -242,5 +264,90 @@ func TestSetupLeavesAnExistingConfigurationAlone(t *testing.T) {
 	}
 	if string(after) != original {
 		t.Errorf("setup rewrote the configuration:\n%s", after)
+	}
+}
+
+// An account with more repositories than the picker shows used to be
+// refused here: "too many to list", go and pass --repo. That is a dead end
+// in the one command whose purpose is not making you look things up, and
+// it is what someone with a lot of repositories hits first.
+//
+// Typing a search now narrows the list instead.
+func TestSetupSearchesWhenThereAreTooManyRepositories(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandlerWith(t, true, true)),
+		withRunnerEnv(&commands),
+		withInteractive(),
+		// Search for "widgets", then take the only match.
+		withStdin("widgets\n1\ny\n"),
+	}
+
+	out, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--name", "runnerly-01", "--dir", preUnpacked(t), "--skip-doctor")
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+
+	if strings.Contains(out, "too many to list") {
+		t.Errorf("it still refuses instead of searching:\n%s", out)
+	}
+	if !strings.Contains(out, "acme/widgets") {
+		t.Errorf("the search did not surface the repository:\n%s", out)
+	}
+	if len(commands) != 1 {
+		t.Fatalf("ran %v, want config.sh once", commands)
+	}
+	if !strings.Contains(commands[0], "acme/widgets") {
+		t.Errorf("registered against the wrong repository:\n%s", commands[0])
+	}
+}
+
+// Someone who already knows the name should not have to find it in a list.
+func TestSetupAcceptsATypedRepositoryName(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandlerWith(t, true, true)),
+		withRunnerEnv(&commands),
+		withInteractive(),
+		withStdin("acme/widgets\ny\n"),
+	}
+
+	if _, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--name", "runnerly-01", "--dir", preUnpacked(t), "--skip-doctor"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if len(commands) != 1 || !strings.Contains(commands[0], "acme/widgets") {
+		t.Errorf("did not register against the typed name: %v", commands)
+	}
+}
+
+// A number outside the list is a mistake to correct, not a reason to exit
+// and make someone start the whole wizard again.
+func TestSetupReAsksOnABadNumber(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+
+	var commands []string
+	opts := []option{
+		withGitHub(t, setupHandler(t, true)),
+		withRunnerEnv(&commands),
+		withInteractive(),
+		withStdin("99\n1\ny\n"),
+	}
+
+	out, _, err := runCLI(t, opts, "--config", cfg, "--token", "t",
+		"setup", "--name", "runnerly-01", "--dir", preUnpacked(t), "--skip-doctor")
+	if err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "99 is not one of the numbers listed") {
+		t.Errorf("it did not say why 99 was rejected:\n%s", out)
+	}
+	if len(commands) != 1 {
+		t.Errorf("ran %v, want it to have carried on and registered once", commands)
 	}
 }

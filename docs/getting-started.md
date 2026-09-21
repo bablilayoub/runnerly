@@ -54,6 +54,11 @@ runnerly setup --repo owner/repo --yes   # for a provisioning script
 With `--yes` it prompts for nothing and fails rather than asking, so supply
 the token through `RUNNERLY_GITHUB_TOKEN`.
 
+If you do not pass `--repo`, it lists the repositories your token can
+administer, most recently pushed first. On an account with more than a
+screenful, type part of a name to narrow the list, or type the full
+`owner/repo` to skip the list entirely.
+
 ## Install
 
 The installer needs a published release. Without one — or on a repository
