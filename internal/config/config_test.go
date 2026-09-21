@@ -119,7 +119,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	// Windows has no permission bits: Go turns the mode into the
+	// read-only attribute, so anything writable reads as 0666 and what
+	// protects a file is the ACL it inherits.
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o600 {
 		t.Errorf("config permissions = %o, want 600", perm)
 	}
 

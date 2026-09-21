@@ -7,7 +7,7 @@
 | Linux x86_64 | developed and tested here |
 | Linux arm64 | developed and tested here |
 | macOS | supported; see [macos.md](macos.md) |
-| Windows | not supported |
+| Windows | not supported yet; see [windows.md](windows.md) |
 
 Ubuntu and Debian are the first-class targets; the remediation commands
 `doctor` prints assume `apt` and `systemd`.
@@ -18,8 +18,12 @@ service manager a Mac actually has. Two things behave differently enough
 to be worth reading before you set one up — protected folders and PATH —
 and both are in [macos.md](macos.md).
 
-Windows is not supported. The job hooks Runnerly installs are shell scripts,
-so cleanup between jobs and `busy` reporting do not work there.
+Windows is not supported yet, and there is no installer for it. The
+platform pieces — unpacking the release, the job hooks, stopping a runner
+gracefully, the machine readings, a scheduled task — are implemented and
+checked by CI on a real Windows machine. What is missing is an end-to-end
+run: nobody has watched a Windows runner take a job. [windows.md](windows.md)
+is the full list of what does and does not work.
 
 ## The installer
 

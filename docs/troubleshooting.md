@@ -114,9 +114,9 @@ NO_COLOR=1 runnerly doctor
 
 A warning rather than a failure, so the exit code is still `0`.
 
-Linux and macOS both pass. Windows is not supported at all — the job hooks
-are shell scripts, so cleanup between jobs and `busy` reporting would not
-work.
+Linux and macOS both pass. Windows warns: the platform pieces work and are
+checked on a real Windows machine, but no runner has been watched taking a
+job there. See [windows.md](windows.md).
 
 ## A macOS service says it is running and does nothing
 

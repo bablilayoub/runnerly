@@ -30,10 +30,13 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 	// argument it was given, one per line.
 	record := filepath.Join(dir, "args.txt")
 	fake := filepath.Join(dir, "fake runnerly.cmd")
+	// The record path has a percent sign in it too, so this script has to
+	// escape it the same way the hook does. Getting that wrong here is
+	// how the first run of this test reported a hook that never ran.
 	script := "@echo off\r\n" +
 		":loop\r\n" +
 		"if \"%~1\"==\"\" goto done\r\n" +
-		"echo %~1>>\"" + record + "\"\r\n" +
+		"echo %~1>>" + batchQuote(record) + "\r\n" +
 		"shift\r\n" +
 		"goto loop\r\n" +
 		":done\r\n" +
@@ -80,6 +83,10 @@ func TestBatchHookRunsUnderCmd(t *testing.T) {
 
 // A hook that exits non-zero fails the job. Runnerly's bookkeeping going
 // wrong must never do that, so the batch file swallows it.
+//
+// This is the test that found the `call`. Without it, batch hands control
+// to the other file and never takes it back, the exit line is never
+// reached, and the hook returns the failure it was supposed to absorb.
 func TestBatchHookExitsZeroEvenWhenTheBinaryFails(t *testing.T) {
 	dir := t.TempDir()
 

@@ -219,7 +219,7 @@ reach the Docker socket has root on the host. See
 | --- | --- |
 | Linux, x86-64 and arm64 | developed and tested here |
 | macOS | supported: runners work, and `agent launchd` writes the LaunchAgent |
-| Windows | not supported — the job hooks are shell scripts |
+| Windows | not supported yet; the platform pieces work and are checked on a real Windows machine — see [docs/windows.md](docs/windows.md) |
 
 GitHub.com is supported. GitHub Enterprise Server is implemented but has not
 been exercised against a real instance.

@@ -206,8 +206,13 @@ func checkOS(goos string) Check {
 	c.Status = StatusWarn
 	switch goos {
 	case "windows":
-		c.Detail = "Windows detected. Runnerly does not support Windows runners: the job\n" +
-			"hooks it installs are shell scripts, so cleanup and busy reporting do not work."
+		// The hooks are a .cmd here now, and so are the other pieces this
+		// used to name. What is still missing is an end-to-end run and an
+		// installer, so the warning stays — but it should say what is
+		// actually true rather than repeating a reason that was fixed.
+		c.Detail = "Windows detected. The platform pieces are implemented and checked by\n" +
+			"CI on a real Windows machine, but no Windows runner has been watched\n" +
+			"taking a job, and there is no installer. Treat it as untried."
 	default:
 		c.Detail = fmt.Sprintf("%s detected. Runnerly is developed and tested on Linux;\n"+
 			"anything else is untried.", goos)

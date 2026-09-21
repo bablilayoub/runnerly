@@ -303,6 +303,20 @@ jobs:
         # skip, and the point of this job is the platform code.
         run: go test ./...
 
+      - name: Smoke-test the CLI
+        # Path handling, config discovery and file permissions are where a
+        # Unix-shaped assumption shows up on Windows, and none of them are
+        # exercised by a unit test that never builds a real command tree.
+        run: |
+          go build -o runnerly.exe ./cmd/runnerly
+          ./runnerly.exe version
+          ./runnerly.exe config init
+          ./runnerly.exe config path
+          ./runnerly.exe config show
+          ./runnerly.exe doctor --offline --json > doctor.json
+          Get-Content doctor.json | ConvertFrom-Json | Out-Null
+        shell: pwsh
+
       - name: Check the machine readings actually ran
         # This suite is the reason the job exists. It skips into a pass on
         # any other platform, so a build tag going wrong would silently

@@ -41,7 +41,8 @@ func newEphemeralCommand(e *env) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newEphemeralRunCommand(e), newEphemeralLogsCommand(e), newEphemeralSystemdCommand(e), newEphemeralLaunchdCommand(e))
+	cmd.AddCommand(newEphemeralRunCommand(e), newEphemeralLogsCommand(e), newEphemeralSystemdCommand(e), newEphemeralLaunchdCommand(e),
+		newEphemeralSchtasksCommand(e))
 	return cmd
 }
 

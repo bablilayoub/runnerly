@@ -50,6 +50,7 @@ const ORDER = [
   "runners",
   "agent",
   "macos",
+  "windows",
   "docker",
   "ephemeral-runners",
   "server",

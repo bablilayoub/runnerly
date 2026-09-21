@@ -8,6 +8,18 @@ land.
 
 ### Added
 
+- **Windows has the platform pieces it was missing**, and a
+  `windows-latest` CI job that checks them on a real Windows machine
+  rather than by cross-compiling. The release unpacks from its zip, the
+  job hooks are a `.cmd`, a graceful stop is a console control event, a
+  secret is read through the console API, the machine readings come from
+  kernel32, and `agent schtasks` prints a scheduled task — a task rather
+  than a service, because the Service Control Manager would start a
+  console program, wait for a reply that never came, and kill it. It is
+  still **not a supported platform**: there is no installer and nobody
+  has watched a Windows runner take a job. [docs/windows.md](docs/windows.md)
+  is the honest list.
+
 - **macOS is supported rather than tolerated.** `runnerly agent launchd`
   and `runnerly ephemeral launchd` write the LaunchAgent that is a Mac's
   equivalent of a systemd unit, and `doctor` stops warning about the

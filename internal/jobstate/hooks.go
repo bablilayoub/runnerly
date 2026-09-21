@@ -59,6 +59,14 @@ const hookScript = `#!/bin/sh
 // `exit /b 0` is the batch equivalent of the `|| true` above, and matters
 // for the same reason: the runner fails the job if a hook exits non-zero,
 // and Runnerly's bookkeeping going wrong must never fail somebody's build.
+//
+// `call` is what makes that true. Without it, a batch file that runs
+// another batch file hands over control and never gets it back: the exit
+// line is not reached, and the hook returns whatever the other file
+// returned. Runnerly is normally an .exe, where it would make no
+// difference — but a .cmd wrapper is exactly the sort of thing an
+// operator puts in front of it, and this failing then would fail builds
+// rather than anything visible here. Found by running it, not reading it.
 const batchHookScript = `@echo off
 rem Installed by Runnerly. Do not edit: it is rewritten whenever the agent
 rem starts.
@@ -67,7 +75,7 @@ rem GitHub's runner runs this %s each job. It records what the runner is
 rem doing so the agent can report it, and cleans up Docker afterwards.
 rem
 rem A failure here must not fail the job, which is what the exit is for.
-%s agent hook %s --state %s --config %s
+call %s agent hook %s --state %s --config %s
 exit /b 0
 `
 

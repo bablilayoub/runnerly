@@ -35,6 +35,7 @@ func newAgentCommand(e *env) *cobra.Command {
 		newAgentStatusCommand(e),
 		newAgentSystemdCommand(e),
 		newAgentLaunchdCommand(e),
+		newAgentSchtasksCommand(e),
 		newHookCommand(e),
 	)
 	return cmd
@@ -43,10 +44,14 @@ func newAgentCommand(e *env) *cobra.Command {
 // serviceGenerator names the subcommand that writes this machine's service
 // file. Pointing a Mac at `agent systemd` was advice it could not follow.
 func serviceGenerator() string {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		return "launchd"
+	case "windows":
+		return "schtasks"
+	default:
+		return "systemd"
 	}
-	return "systemd"
 }
 
 // resolveInstalledRunner finds the runner a command acts on: the one named, or

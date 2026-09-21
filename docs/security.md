@@ -107,6 +107,15 @@ environment per job and a boundary around the job are different things.
 `runnerly login` stores the token in `credentials.yaml` beside `config.yaml`,
 with mode 0600 on a directory with mode 0700.
 
+On Windows that is not what happens, and it is worth saying rather than
+leaving the sentence above to be read as universal: Go turns a mode into
+the read-only attribute and nothing else, so the file is protected by the
+ACL it inherits from its directory, which Runnerly does not set. In
+practice that directory is inside the user's profile and is already
+private — but Runnerly is not the thing making it so. Windows is not a
+supported platform yet; this is one of the reasons. See
+[windows.md](windows.md).
+
 **That file is not encrypted.** This is a deliberate choice, not an oversight. A
 local CLI has nowhere to keep a key that an attacker who can read the file could
 not also read, so encrypting the token beside its own key would imply a
@@ -152,7 +161,8 @@ These are commitments about Runnerly's own behavior.
   would land outside it, including symlink targets.
 - **Registration tokens are redacted** from error output, which tends to end up
   in logs and issue reports.
-- **The configuration and credentials files are written `0600`.**
+- **The configuration and credentials files are written `0600`**, on the
+  platforms where that means something. Not on Windows; see above.
 - **No silent privileged operations.** When something needs root, Runnerly
   says why before doing it.
 - **The agent runs as a dedicated non-root user** wherever the execution mode

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/bablilayoub/runnerly/internal/config"
 )
@@ -80,6 +81,20 @@ func BinaryPath() string {
 	}
 	if found, err := exec.LookPath(name); err == nil {
 		return found
+	}
+	return defaultBinaryPath(name)
+}
+
+// defaultBinaryPath is the last resort, when the binary is neither this
+// process, nor beside it, nor on PATH.
+//
+// It has to be absolute, because the hooks run from a working directory
+// nobody controls. /usr/local/bin is where install.sh puts it — and is
+// meaningless on Windows, where it produced a path the hook would look
+// for on whatever drive it happened to be running from.
+func defaultBinaryPath(name string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("ProgramFiles"), "Runnerly", name+".exe")
 	}
 	return "/usr/local/bin/" + name
 }

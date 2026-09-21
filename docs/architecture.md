@@ -238,8 +238,11 @@ and the one thing an ephemeral runner does not give you. See
 Deliberately out of scope: Kubernetes, autoscaling, cloud provisioning, GPU
 scheduling, multi-tenancy and local workflow execution.
 
-Windows runners are out of scope for a concrete reason: the job hooks are
-shell scripts, so cleanup between jobs and `busy` reporting would not work.
+Windows is not supported yet, which used to be a decision and is now a gap:
+the job hooks are a `.cmd` there, the release unpacks from its zip, a
+graceful stop is a console event, and CI checks each of those on a real
+Windows machine. What is missing is an installer and an end-to-end run. See
+[windows.md](windows.md).
 macOS is supported: `agent launchd` writes a LaunchAgent, which is what a
 Mac has instead of systemd. It is an agent rather than a daemon on purpose,
 because a daemon has no login session and a Mac build usually needs one.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +13,10 @@ import (
 func noEnv(string) string { return "" }
 
 func TestPathSitsBesideConfig(t *testing.T) {
-	got := Path("/etc/runnerly/config.yaml")
-	if got != "/etc/runnerly/credentials.yaml" {
-		t.Errorf("Path() = %q", got)
+	config := filepath.Join("etc", "runnerly", "config.yaml")
+	want := filepath.Join("etc", "runnerly", FileName)
+	if got := Path(config); got != want {
+		t.Errorf("Path(%q) = %q, want %q", config, got, want)
 	}
 }
 
@@ -40,7 +42,9 @@ func TestStoreAndResolveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	// Windows has no permission bits. See TestStoredTokenIsNotWorldReadable
+	// below for what does and does not hold there.
+	if perm := info.Mode().Perm(); runtime.GOOS != "windows" && perm != 0o600 {
 		t.Errorf("credentials permissions = %o, want 600", perm)
 	}
 
@@ -254,7 +258,22 @@ func TestRedact(t *testing.T) {
 	}
 }
 
+// TestStoredTokenIsNotWorldReadable asserts the property Runnerly claims
+// about the file holding a GitHub token: nobody else on the machine can
+// read it.
+//
+// It does not hold on Windows, and saying so here is deliberate. Go turns
+// a mode into the read-only attribute and nothing else; what limits
+// access is the ACL the file inherits from its directory, which Runnerly
+// does not set. In practice that directory is inside the user's profile
+// and is already private — but Runnerly is not the thing making it so,
+// and a test that skipped quietly would let that read as covered. It is
+// listed as a gap in docs/windows.md.
 func TestStoredTokenIsNotWorldReadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Runnerly does not set an ACL on Windows; see docs/windows.md")
+	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", FileName)
 	if err := Store(path, "github.com", Host{Token: "t", CreatedAt: time.Now()}); err != nil {
