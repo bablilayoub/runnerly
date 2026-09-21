@@ -106,7 +106,7 @@ func installHooks(goos, runnerDir, binary, configPath string) (Hooks, error) {
 
 	script, quote, suffix := hookScript, shellQuote, ".sh"
 	if goos == "windows" {
-		script, quote, suffix = batchHookScript, batchQuote, ".cmd"
+		script, quote, suffix = batchHookScript, batchQuoteCalled, ".cmd"
 	}
 
 	statePath := Path(runnerDir)
@@ -139,18 +139,35 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// batchQuote makes a path safe as one argument in a .cmd file.
+// batchQuote makes a path safe as one argument on an ordinary batch line.
 //
 // Double quotes handle spaces and the characters cmd treats as operators.
-// A percent sign is the one they do not handle: cmd expands %NAME% inside
-// quotes as happily as outside, and %USERPROFILE% is a perfectly legal
-// thing to find in a Windows directory name. Doubling it is how a batch
-// file writes a literal one.
+// A percent sign is the one they do not handle: cmd expands it inside
+// quotes as happily as outside, and a Windows directory name may legally
+// contain one. Doubling is how a batch file writes a literal percent, and
+// a lone one that expands to nothing is simply deleted — which is how
+// C:\builds\100%conf\x arrives as C:\builds\100conf\x.
 //
 // A double quote cannot appear in a Windows path at all, so there is
 // nothing to escape and nothing to smuggle in through one.
 func batchQuote(s string) string {
 	return `"` + strings.ReplaceAll(s, "%", "%%") + `"`
+}
+
+// batchQuoteCalled is batchQuote for a line that starts with `call`.
+//
+// `call` re-parses the line it was handed, so everything on it is percent
+// expanded twice: once by the batch parser reading the file, and once by
+// call reading what the parser produced. Four percent signs become two
+// become one.
+//
+// This is not theoretical. The hook is a `call` line, it was quoted for a
+// single pass, and a config path containing a percent arrived at the
+// binary with that percent and the character after it missing. The
+// Windows job caught it by running the hook and reading back the
+// arguments the other side actually received.
+func batchQuoteCalled(s string) string {
+	return `"` + strings.ReplaceAll(s, "%", "%%%%") + `"`
 }
 
 // FromEnvironment reads what the runner tells a hook about the current job.

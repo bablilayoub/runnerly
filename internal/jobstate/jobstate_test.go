@@ -243,7 +243,7 @@ func TestInstallHooksWritesBatchOnWindows(t *testing.T) {
 	text := string(body)
 	for _, want := range []string{
 		"@echo off",
-		`"C:\Program Files\runnerly\runnerly.exe" agent hook started`,
+		`call "C:\Program Files\runnerly\runnerly.exe" agent hook started`,
 		// The runner fails the job if a hook exits non-zero, so it must not.
 		"exit /b 0",
 	} {
@@ -271,6 +271,21 @@ func TestBatchQuoteDoublesPercentSigns(t *testing.T) {
 	}
 	if got != `"C:\builds\100%%done\%%USERNAME%%"` {
 		t.Errorf("batchQuote() = %s", got)
+	}
+}
+
+// The hook is a `call` line, and `call` expands the line it was handed a
+// second time. Four become two become one.
+func TestBatchQuoteCalledSurvivesTwoExpansions(t *testing.T) {
+	got := batchQuoteCalled(`C:\builds\100%done`)
+	if got != `"C:\builds\100%%%%done"` {
+		t.Errorf("batchQuoteCalled() = %s", got)
+	}
+
+	// What cmd does to it: each pass halves the run of percent signs.
+	pass := func(s string) string { return strings.ReplaceAll(s, "%%", "%") }
+	if final := pass(pass(got)); final != `"C:\builds\100%done"` {
+		t.Errorf("after two expansions = %s, want the path back", final)
 	}
 }
 
