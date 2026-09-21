@@ -32,13 +32,7 @@ const INSTALL = "curl -fsSL https://runnerly.dev/install.sh | sh"
 
 export default function App() {
   return (
-    // No bg-background here. The backdrop is a fixed layer at z-index -10,
-    // and a wrapper with its own opaque background paints straight over it
-    // — which is exactly what was happening: every layer of the backdrop
-    // was being drawn and then covered. The body already sets the page
-    // background, so this element does not need to.
     <div className="min-h-dvh text-foreground antialiased">
-      <Backdrop />
       <Nav />
       <Hero />
       <Stats />
@@ -49,124 +43,6 @@ export default function App() {
       <Docs />
       <Footer />
     </div>
-  )
-}
-
-/**
- * The backdrop behind the hero.
- *
- * Five layers, all luminance, because the palette has no hue to reach for:
- * beams, a dot field, a glow, a horizon, and grain over everything.
- *
- * Nothing here runs per frame in JavaScript. The movement is CSS keyframes
- * on transform and opacity, which stay on the compositor, and all of it
- * stops for anyone who asked for reduced motion.
- */
-function Backdrop() {
-  return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      <Beams />
-
-      {/* A dot field rather than a line grid: at this opacity lines read as
-          a surface and dots read as depth. Masked so it is gone before it
-          reaches the text. */}
-      <div
-        className="absolute inset-0 opacity-[0.3]"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at center, rgb(255 255 255 / 0.22) 1px, transparent 1px)",
-          backgroundSize: "26px 26px",
-          maskImage: "radial-gradient(ellipse 85% 58% at 50% 0%, black 15%, transparent 72%)",
-          WebkitMaskImage: "radial-gradient(ellipse 85% 58% at 50% 0%, black 15%, transparent 72%)",
-        }}
-      />
-
-      <div className="absolute left-1/2 top-[-26rem] size-[56rem] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[170px] motion-safe:animate-[drift-a_28s_ease-in-out_infinite]" />
-
-      {/* The horizon: one hairline, brightest where the glow sits. */}
-      <div
-        className="absolute inset-x-0 top-[38rem] h-px"
-        style={{
-          background:
-            "linear-gradient(to right, transparent, rgb(255 255 255 / 0.10) 35%, rgb(255 255 255 / 0.16) 50%, rgb(255 255 255 / 0.10) 65%, transparent)",
-        }}
-      />
-
-      <Grain />
-    </div>
-  )
-}
-
-/**
- * Beams: soft columns of light leaning across the top of the page, each
- * drifting and breathing on its own period so the group never repeats
- * visibly.
- *
- * They are the layer doing most of the work. A glow alone is a blur, and
- * every dark landing page has one; light with a direction reads as a room
- * rather than a gradient.
- */
-function Beams() {
-  const beams = [
-    { left: "6%", width: "18rem", tilt: -14, delay: "0s", duration: "19s", alpha: 0.16 },
-    { left: "27%", width: "12rem", tilt: -9, delay: "-6s", duration: "25s", alpha: 0.11 },
-    { left: "52%", width: "22rem", tilt: -17, delay: "-11s", duration: "22s", alpha: 0.19 },
-    { left: "76%", width: "14rem", tilt: -7, delay: "-3s", duration: "28s", alpha: 0.12 },
-  ]
-
-  return (
-    <div
-      className="absolute inset-x-0 top-[-14rem] h-[64rem]"
-      style={{
-        maskImage: "linear-gradient(to bottom, black 8%, transparent 78%)",
-        WebkitMaskImage: "linear-gradient(to bottom, black 8%, transparent 78%)",
-      }}
-    >
-      {beams.map((b) => (
-        <div
-          key={b.left}
-          className="absolute top-0 h-full origin-top blur-2xl motion-safe:animate-[beam_var(--dur)_ease-in-out_var(--delay)_infinite]"
-          style={
-            {
-              left: b.left,
-              width: b.width,
-              // The animation sets transform wholesale, so the tilt has to
-              // reach the keyframes as a variable. Setting it here as well
-              // would be overwritten on the first frame.
-              transform: `rotate(${b.tilt}deg)`,
-              background: `linear-gradient(to bottom, rgb(255 255 255 / ${b.alpha}), transparent 72%)`,
-              "--tilt": `${b.tilt}deg`,
-              "--dur": b.duration,
-              "--delay": b.delay,
-            } as React.CSSProperties
-          }
-        />
-      ))}
-    </div>
-  )
-}
-
-/**
- * Grain, as an inline turbulence filter.
- *
- * Large flat dark areas band badly on ordinary displays, and a little noise
- * is what stops it. Inline rather than an image so there is no request for
- * it and nothing to keep in sync.
- */
-function Grain() {
-  return (
-    <svg className="absolute inset-0 size-full opacity-[0.035] mix-blend-overlay" aria-hidden>
-      <filter id="grain">
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency="0.85"
-          numOctaves="3"
-          stitchTiles="stitch"
-        />
-        <feColorMatrix type="saturate" values="0" />
-      </filter>
-      <rect width="100%" height="100%" filter="url(#grain)" />
-    </svg>
   )
 }
 

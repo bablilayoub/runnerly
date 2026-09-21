@@ -150,27 +150,3 @@
     color: oklch(0.115 0 0);
   }
 }
-
-/* The hero's two glows. Different periods and paths, so the pair never
-   returns to the same arrangement on a short cycle and the movement stays
-   below the threshold of being noticed. Both are transform-only, so they
-   stay on the compositor. */
-@keyframes drift-a {
-  0%,
-  100% {
-    transform: translate(-50%, 0) scale(1);
-  }
-  50% {
-    transform: translate(-46%, 2.5rem) scale(1.07);
-  }
-}
-
-@keyframes drift-b {
-  0%,
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
-  50% {
-    transform: translate(4rem, 1.5rem) scale(0.93);
-  }
-}
