@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
+	"github.com/bablilayoub/runnerly/internal/machine"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 )
 
@@ -18,7 +19,7 @@ import (
 type fakeControlPlane struct {
 	mu         sync.Mutex
 	events     []string
-	heartbeats []string
+	heartbeats []controlplane.HeartbeatRequest
 
 	server *httptest.Server
 }
@@ -50,7 +51,7 @@ func newFakeControlPlane(t *testing.T) *fakeControlPlane {
 			t.Errorf("heartbeat body: %v", err)
 		}
 		f.mu.Lock()
-		f.heartbeats = append(f.heartbeats, body.Status)
+		f.heartbeats = append(f.heartbeats, body)
 		f.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -88,7 +89,22 @@ func (f *fakeControlPlane) reported() []string {
 func (f *fakeControlPlane) statuses() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.heartbeats...)
+
+	out := make([]string, 0, len(f.heartbeats))
+	for _, hb := range f.heartbeats {
+		out = append(out, hb.Status)
+	}
+	return out
+}
+
+// lastHeartbeat returns the most recent report, or false if there was none.
+func (f *fakeControlPlane) lastHeartbeat() (controlplane.HeartbeatRequest, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.heartbeats) == 0 {
+		return controlplane.HeartbeatRequest{}, false
+	}
+	return f.heartbeats[len(f.heartbeats)-1], true
 }
 
 // TestShutdownEventsReachTheControlPlane is a regression test.
@@ -325,5 +341,47 @@ func TestReportingStopsAfterTheCredentialIsRefused(t *testing.T) {
 	}
 	if !rep.stopped() {
 		t.Error("the reporter does not consider itself stopped")
+	}
+}
+
+// TestHeartbeatsCarryTheMachineLoad is the same class of test as the one
+// above it, for the same class of bug: cpu, memory and disk were declared
+// on the heartbeat, accepted by the server, stored, and rendered on the
+// runner page, and nothing ever set them. The panel read "—" forever and
+// no test noticed, because everything it touched worked.
+func TestHeartbeatsCarryTheMachineLoad(t *testing.T) {
+	fake := newFakeControlPlane(t)
+	rep := newReporter(fake.client(), testLogger(), time.Hour, "")
+	rep.load = func() machine.Load {
+		return machine.Load{CPUPercent: 31.5, MemoryPercent: 62, DiskPercent: 7.25}
+	}
+
+	rep.heartbeat()
+
+	hb, ok := fake.lastHeartbeat()
+	if !ok {
+		t.Fatal("no heartbeat was sent")
+	}
+	if hb.CPUPercent != 31.5 || hb.MemoryPercent != 62 || hb.DiskPercent != 7.25 {
+		t.Errorf("reported cpu=%v memory=%v disk=%v, want 31.5, 62, 7.25",
+			hb.CPUPercent, hb.MemoryPercent, hb.DiskPercent)
+	}
+}
+
+// Without a sampler the heartbeat reports zeroes, which every surface
+// renders as a dash. It must not invent a reading.
+func TestHeartbeatsWithoutASamplerReportNothing(t *testing.T) {
+	fake := newFakeControlPlane(t)
+	rep := newReporter(fake.client(), testLogger(), time.Hour, "")
+
+	rep.heartbeat()
+
+	hb, ok := fake.lastHeartbeat()
+	if !ok {
+		t.Fatal("no heartbeat was sent")
+	}
+	if hb.CPUPercent != 0 || hb.MemoryPercent != 0 || hb.DiskPercent != 0 {
+		t.Errorf("reported cpu=%v memory=%v disk=%v with nothing sampling",
+			hb.CPUPercent, hb.MemoryPercent, hb.DiskPercent)
 	}
 }

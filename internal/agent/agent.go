@@ -25,6 +25,7 @@ import (
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
 	"github.com/bablilayoub/runnerly/internal/jobstate"
+	"github.com/bablilayoub/runnerly/internal/machine"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 )
@@ -210,6 +211,18 @@ func Run(ctx context.Context, opts Options) (Outcome, error) {
 	if report != nil {
 		reportCtx, stopReporting := context.WithCancel(context.Background())
 		defer stopReporting()
+
+		// Readings are taken on their own schedule and heartbeats use
+		// whichever is latest. Taking one inline would put a second of
+		// macOS subprocess in the middle of every report.
+		sampler := machine.NewSampler(opts.Runner.Dir)
+		report.load = sampler.Latest
+
+		reporting.Add(1)
+		go func() {
+			defer reporting.Done()
+			sampler.Run(reportCtx, opts.HeartbeatInterval)
+		}()
 
 		reporting.Add(1)
 		go func() {

@@ -216,7 +216,11 @@ A failed heartbeat is logged and retried on the next tick. A control plane
 that is down does not take a working runner with it.
 
 The agent reports `starting`, `online`, `busy`, `stopping`, `offline` and
-`error`.
+`error`, and alongside each one how hard the machine is working: processor,
+memory and disk use as percentages. Those readings are taken on their own
+schedule and the heartbeat carries whichever is latest, so measuring never
+delays a report. What each figure means, and what it means on each platform,
+is in [dashboard.md](dashboard.md#what-the-load-figures-mean).
 
 `busy` comes from the job hooks, which the runner itself calls when a job
 starts and finishes. The Docker executor installs them, because it needs

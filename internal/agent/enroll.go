@@ -12,6 +12,7 @@ import (
 
 	"github.com/bablilayoub/runnerly/internal/auth"
 	"github.com/bablilayoub/runnerly/internal/controlplane"
+	"github.com/bablilayoub/runnerly/internal/machine"
 	"github.com/bablilayoub/runnerly/internal/state"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
@@ -154,9 +155,10 @@ func Enroll(ctx context.Context, opts EnrollOptions) (*Enrollment, error) {
 
 // registrationFor describes this machine to the control plane.
 //
-// CPU count comes from the runtime. Total memory and disk are left at zero:
-// reading them needs per-platform syscalls, and reporting a number Runnerly
-// has not actually measured would be worse than reporting none.
+// CPU count comes from the runtime; memory and disk need per-platform calls
+// and come from internal/machine. Anything that cannot be measured on this
+// platform is reported as zero, which every surface renders as a dash:
+// unknown rather than a number Runnerly did not actually take.
 func registrationFor(r state.Runner) controlplane.RegisterRequest {
 	scope := string(r.Scope.Kind)
 	if scope == "" {
@@ -170,15 +172,11 @@ func registrationFor(r state.Runner) controlplane.RegisterRequest {
 		OS:            runtime.GOOS,
 		Architecture:  runtime.GOARCH,
 		CPUCount:      runtime.NumCPU(),
-		// These two were declared, sent, stored and shown on the runner
-		// page, and never once set: the dashboard's Memory and Disk rows
-		// were always a dash. Unknown is still reported as 0 rather than
-		// guessed at, and still renders as a dash.
-		MemoryBytes:  memoryTotal(),
-		DiskBytes:    diskTotal(r.Dir),
-		Labels:       r.Labels,
-		Ephemeral:    r.Ephemeral,
-		AgentVersion: version.Get().Short(),
+		MemoryBytes:   machine.MemoryTotal(),
+		DiskBytes:     machine.DiskTotal(r.Dir),
+		Labels:        r.Labels,
+		Ephemeral:     r.Ephemeral,
+		AgentVersion:  version.Get().Short(),
 	}
 }
 

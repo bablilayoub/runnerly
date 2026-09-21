@@ -58,6 +58,7 @@ internal/docker/     preparing and tidying the Docker environment
 internal/jobstate/   what the runner is doing, via GitHub's job hooks
 internal/doctor/     machine diagnostics and their rendering
 internal/github/     a narrow GitHub REST client
+internal/machine/    what this computer is, and how hard it is working
 internal/metrics/    the Prometheus registry and text format
 internal/ratelimit/  per-client token buckets
 internal/runner/     installing and configuring actions/runner

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
+	"github.com/bablilayoub/runnerly/internal/machine"
 	"github.com/bablilayoub/runnerly/internal/server"
 	"github.com/bablilayoub/runnerly/internal/store"
 	"github.com/bablilayoub/runnerly/internal/storetest"
@@ -289,5 +290,71 @@ func TestAFailedCommandIsReportedWithItsReason(t *testing.T) {
 	}
 	if commands[0].Status != store.CommandFailed || commands[0].Error != "the runner would not stop" {
 		t.Errorf("command = %+v", commands[0])
+	}
+}
+
+// TestARealReadingReachesTheDatabase closes the loop the unit tests each
+// cover one link of: a measurement taken from the machine running the
+// test, sent by the real client, accepted by the real server, and read
+// back out of a real database.
+//
+// It exists because every link in that chain worked and the figure on the
+// page was still a dash. The wire fields, the handler, the column and the
+// component were all in place; nothing measured anything. A test that
+// asserts a fixture travels intact would have passed the whole time.
+func TestARealReadingReachesTheDatabase(t *testing.T) {
+	baseURL, db := liveServer(t)
+	ctx := context.Background()
+
+	registered, err := controlplane.New(baseURL, "").
+		Register(ctx, enrollmentToken(t, db), sampleRegistration())
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	client := controlplane.New(baseURL, registered.MachineToken)
+
+	// A real sampler, reading this machine. Run rather than Latest,
+	// because Latest before the first refresh is honestly nothing.
+	sampler := machine.NewSampler(t.TempDir())
+	sampleCtx, stop := context.WithTimeout(ctx, 30*time.Second)
+	defer stop()
+	go sampler.Run(sampleCtx, time.Second)
+
+	var load machine.Load
+	for deadline := time.Now().Add(25 * time.Second); time.Now().Before(deadline); {
+		if load = sampler.Latest(); load != (machine.Load{}) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if load == (machine.Load{}) {
+		t.Fatal("the sampler measured nothing at all on the machine running this test")
+	}
+
+	if _, err := client.Heartbeat(ctx, controlplane.HeartbeatRequest{
+		Status:        "online",
+		CPUPercent:    load.CPUPercent,
+		MemoryPercent: load.MemoryPercent,
+		DiskPercent:   load.DiskPercent,
+	}); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+
+	stored, err := db.Runner(ctx, registered.Runner.ID)
+	if err != nil {
+		t.Fatalf("Runner() error = %v", err)
+	}
+	if stored.CPUPercent != load.CPUPercent ||
+		stored.MemoryPercent != load.MemoryPercent ||
+		stored.DiskPercent != load.DiskPercent {
+		t.Errorf("stored cpu=%v memory=%v disk=%v, measured %+v",
+			stored.CPUPercent, stored.MemoryPercent, stored.DiskPercent, load)
+	}
+
+	// Disk is the reading every platform Runnerly supports can take, so it
+	// is the one that must not come back empty.
+	if stored.DiskPercent <= 0 {
+		t.Errorf("disk use came back as %v, which the dashboard renders as a dash",
+			stored.DiskPercent)
 	}
 }

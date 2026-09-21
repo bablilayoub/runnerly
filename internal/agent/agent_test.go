@@ -710,37 +710,27 @@ func TestRunnerVersionFromRelease(t *testing.T) {
 	}
 }
 
-// TestMachineFactsAreReported covers two more fields that were declared,
-// transmitted, stored and displayed while nothing ever set them: the
-// runner page's Memory and Disk rows were permanently a dash.
+// TestRegistrationCarriesMachineFacts covers two more fields that were
+// declared, transmitted, stored and displayed while nothing ever set them:
+// the runner page's Memory and Disk rows were permanently a dash.
 //
 // Same shape as the runner version before it. Nothing fails when a field
 // like this is empty, which is exactly why it survives — it was found by
-// looking at the dashboard for the first time.
-func TestMachineFactsAreReported(t *testing.T) {
-	mem := memoryTotal()
-	if mem <= 0 {
-		t.Errorf("memoryTotal() = %d, want the machine's physical memory", mem)
+// looking at the dashboard for the first time. How each number is read is
+// internal/machine's business and tested there; what is tested here is
+// that registration asks for them at all.
+func TestRegistrationCarriesMachineFacts(t *testing.T) {
+	req := registrationFor(state.Runner{Name: "probe", Dir: t.TempDir()})
+
+	if req.CPUCount <= 0 {
+		t.Errorf("CPUCount = %d, want this machine's processor count", req.CPUCount)
 	}
 	// A machine with under 256 MiB is not running CI, so a number that
 	// small means the units are wrong rather than the machine being tiny.
-	if mem > 0 && mem < 256<<20 {
-		t.Errorf("memoryTotal() = %d bytes, too small to be a byte count", mem)
+	if req.MemoryBytes < 256<<20 {
+		t.Errorf("MemoryBytes = %d, too small to be a byte count", req.MemoryBytes)
 	}
-
-	disk := diskTotal(t.TempDir())
-	if disk <= 0 {
-		t.Errorf("diskTotal() = %d, want the size of the filesystem", disk)
-	}
-	if disk > 0 && disk < 64<<20 {
-		t.Errorf("diskTotal() = %d bytes, too small to be a byte count", disk)
-	}
-}
-
-// A path that does not exist cannot be measured, and reports unknown
-// rather than a made-up number.
-func TestDiskTotalUnknownPathIsZero(t *testing.T) {
-	if got := diskTotal("/no/such/path/anywhere"); got != 0 {
-		t.Errorf("diskTotal(missing) = %d, want 0", got)
+	if req.DiskBytes < 64<<20 {
+		t.Errorf("DiskBytes = %d, too small to be a byte count", req.DiskBytes)
 	}
 }

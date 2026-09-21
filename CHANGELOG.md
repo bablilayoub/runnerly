@@ -6,6 +6,45 @@ land.
 
 ## Unreleased
 
+## 0.1.2
+
+### Added
+
+- The runner page's processor, memory and disk figures are measured and
+  reported. They were rendered from fields nothing ever set, so the panel
+  read "—" on every runner. Processor use is the difference between two
+  readings of `/proc/stat` on Linux and a one-second `iostat` sample on
+  macOS, where there is no counter to difference without cgo. Memory is
+  what is committed rather than what is unfree — `MemAvailable` on Linux,
+  the figure Activity Monitor calls Memory Used on macOS — because
+  reporting free memory shows every healthy build machine at 97%. Inside a
+  container with a cgroup v2 memory limit, the limit is the total.
+  Readings are taken on their own schedule and the heartbeat carries the
+  latest, so measuring never delays a report. A platform that cannot
+  measure something still reports nothing rather than zero.
+
+### Fixed
+
+- `runnerly setup` ended the command when you picked a public repository,
+  telling you to start again with `--allow-public` — after its own picker
+  had offered the repository. The refusal is right, because a runner on a
+  public repository executes whatever a pull request asks of it, but it is
+  now delivered as a question to the person standing there. Declining goes
+  back to the list. A scope named with `--repo` is still refused outright,
+  and `--yes` still requires `--allow-public`.
+- The runner page's Memory and Disk rows were always a dash. Both fields
+  were declared, transmitted, stored and rendered, and nothing set them.
+- The agent logged "reporting is stopping" after the control plane refused
+  its credential and then carried on retrying every heartbeat, forever.
+  The runner does keep running, which is deliberate; the reporting really
+  stops now, and the message says how to restore it.
+- `runnerly doctor` reported a bare Ubuntu machine as ready and `setup`
+  then failed at `config.sh` with "Libicu's dependencies is missing for
+  Dotnet Core 6.0", a message naming neither Runnerly nor the package.
+  doctor checks for libicu and names it.
+- The overview said "1 runner have not reported ... They are still
+  counted".
+
 ## 0.1.1
 
 ### Fixed

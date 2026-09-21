@@ -9,6 +9,7 @@ import (
 
 	"github.com/bablilayoub/runnerly/internal/controlplane"
 	"github.com/bablilayoub/runnerly/internal/jobstate"
+	"github.com/bablilayoub/runnerly/internal/machine"
 	"github.com/bablilayoub/runnerly/internal/supervisor"
 	"github.com/bablilayoub/runnerly/internal/version"
 )
@@ -44,6 +45,13 @@ type reporter struct {
 	// job hooks installed and cannot tell, in which case it reports what it
 	// does know rather than guessing at "busy".
 	jobState func() jobstate.State
+	// load returns the machine's latest utilization reading. Nil means
+	// nothing is sampling, and the heartbeat reports zeroes, which the
+	// dashboard shows as dashes.
+	//
+	// It must not block: it is called on the heartbeat path, and on macOS
+	// taking a reading costs a second.
+	load func() machine.Load
 	// onToken persists a credential the control plane rotated.
 	onToken func(string) error
 	// lastToken is what was persisted, so the same rotation is not written
@@ -260,6 +268,13 @@ func (r *reporter) heartbeat() {
 	dropped := r.dropped
 	r.dropped = 0
 	r.mu.Unlock()
+
+	if r.load != nil {
+		load := r.load()
+		req.CPUPercent = load.CPUPercent
+		req.MemoryPercent = load.MemoryPercent
+		req.DiskPercent = load.DiskPercent
+	}
 
 	// A running job outranks "online": the process being up says nothing
 	// about whether it is doing anything. Only override a healthy status,

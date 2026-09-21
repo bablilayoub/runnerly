@@ -50,6 +50,41 @@ than an archive.
 Creating one here shows the secret once, with the exact commands to run on the
 machine.
 
+## What the load figures mean
+
+The runner page reports processor, memory and disk use on every heartbeat.
+Each is a percentage from 0 to 100, and each is a dash when the machine has
+no way to measure it — unknown is shown as unknown rather than as zero.
+
+**Processor** is time spent doing anything other than idling, across all
+cores. On Linux it is the difference between two readings of `/proc/stat`,
+so the window is the heartbeat interval and the figure is an average over
+it rather than a spot reading. On macOS there is no counter to difference
+without cgo, so it is a one-second sample taken with `iostat`.
+
+**Memory** is what is committed, not what is unfree. On Linux that is
+`MemAvailable`: the kernel's own estimate of what a new workload could get.
+Page cache does not count as used, which matters because on any machine
+that has been up a while almost nothing is free and reporting `MemFree`
+would show every healthy build machine at 97%. On macOS it is the figure
+Activity Monitor calls Memory Used — anonymous pages, less purgeable, plus
+wired plus the compressor — so it can be checked against the machine.
+
+Inside a container with a cgroup v2 memory limit, both the total and the
+percentage are the container's, not the host's. A runner capped at 2 GiB is
+a 2 GiB machine as far as anything it runs is concerned. Processor use is
+still the host's: `/proc/stat` is not namespaced.
+
+**Disk** is how full the filesystem holding the runner directory is, with
+space reserved for root counted as used, because a build cannot write to
+it. On Linux this is the number `df` prints. On macOS it is not: `statfs`
+describes the whole APFS container while `df` splits it per volume, so a
+460 GiB disk with 235 GiB free reads as 49% full here and 46% in `df`. The
+first is the one that answers whether a build will fit.
+
+Readings are taken on their own schedule and the heartbeat sends whichever
+is latest, so a slow measurement never delays a report.
+
 ## Restart
 
 Restart asks the agent to stop the runner and start it again. The agent sends
