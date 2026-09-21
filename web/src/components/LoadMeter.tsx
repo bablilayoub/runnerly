@@ -62,7 +62,18 @@ export function MiniLoad({ cpu, memory, disk }: { cpu: number; memory: number; d
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex w-14 flex-col gap-[3px] py-1 align-middle">
+        {/* Labelled rather than focusable: the tooltip is a convenience
+            for a pointer, and a tab stop per row would put five of them
+            between the reader and the next thing they wanted. The same
+            numbers are read out here, and spelled out on the runner's
+            own page. */}
+        <span
+          role="img"
+          aria-label={readings
+            .map((r) => `${r.name} ${r.value > 0 ? `${Math.round(r.value)} percent` : 'unknown'}`)
+            .join(', ')}
+          className="inline-flex w-14 flex-col gap-[3px] py-1 align-middle"
+        >
           {readings.map((reading) => (
             <span key={reading.name} className="h-[3px] w-full rounded-full bg-muted">
               {reading.value > 0 && (

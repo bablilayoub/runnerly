@@ -1,4 +1,4 @@
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { MiniLoad } from '@/components/LoadMeter'
 import { Panel } from '@/components/Panel'
@@ -88,7 +88,16 @@ export function Runners() {
                 className="cursor-pointer"
               >
                 <TableCell>
-                  <span className="font-medium whitespace-nowrap">{runner.name}</span>
+                  {/* A real link, not just the row's click handler: a <tr>
+                      that navigates cannot be reached by keyboard, and the
+                      row click is a convenience on top of this rather than
+                      the only way in. */}
+                  <Link
+                    to={`/runners/${runner.id}`}
+                    className="font-medium whitespace-nowrap rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    {runner.name}
+                  </Link>
                   {runner.ephemeral && (
                     <span className="ml-2 text-xs text-muted-foreground">ephemeral</span>
                   )}
