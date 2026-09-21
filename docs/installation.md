@@ -6,16 +6,17 @@
 | --- | --- |
 | Linux x86_64 | developed and tested here |
 | Linux arm64 | developed and tested here |
-| macOS | runners work; no service integration |
+| macOS | supported; see [macos.md](macos.md) |
 | Windows | not supported |
 
 Ubuntu and Debian are the first-class targets; the remediation commands
 `doctor` prints assume `apt` and `systemd`.
 
-A runner does register and run real jobs on macOS. What is missing is the
-service integration: `runnerly agent systemd` generates a systemd unit, which
-macOS does not use, so run the agent in the foreground or keep it under
-launchd yourself. `doctor` says so and still exits `0`.
+macOS is supported: runners register, take jobs and come back after a
+reboot. `runnerly agent launchd` writes the LaunchAgent, which is the
+service manager a Mac actually has. Two things behave differently enough
+to be worth reading before you set one up — protected folders and PATH —
+and both are in [macos.md](macos.md).
 
 Windows is not supported. The job hooks Runnerly installs are shell scripts,
 so cleanup between jobs and `busy` reporting do not work there.

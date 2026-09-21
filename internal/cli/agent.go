@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"text/template"
@@ -33,9 +34,19 @@ func newAgentCommand(e *env) *cobra.Command {
 		newAgentRunCommand(e),
 		newAgentStatusCommand(e),
 		newAgentSystemdCommand(e),
+		newAgentLaunchdCommand(e),
 		newHookCommand(e),
 	)
 	return cmd
+}
+
+// serviceGenerator names the subcommand that writes this machine's service
+// file. Pointing a Mac at `agent systemd` was advice it could not follow.
+func serviceGenerator() string {
+	if runtime.GOOS == "darwin" {
+		return "launchd"
+	}
+	return "systemd"
 }
 
 // resolveInstalledRunner finds the runner a command acts on: the one named, or
@@ -68,7 +79,8 @@ func newAgentRunCommand(e *env) *cobra.Command {
 			"that rather than hiding a runner that cannot start.\n\n" +
 			"It runs in the foreground and stops cleanly on Ctrl-C or SIGTERM, sending the\n" +
 			"runner SIGTERM first so it can finish the job it is on.\n\n" +
-			"For a machine that should run a runner at boot, use `runnerly agent systemd`\n" +
+			"For a machine that should run a runner at boot, use `runnerly agent " +
+			serviceGenerator() + "`\n" +
 			"and let the service manager supervise runnerly-agent instead.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

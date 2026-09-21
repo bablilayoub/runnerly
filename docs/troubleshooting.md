@@ -108,16 +108,38 @@ NO_COLOR=1 runnerly doctor
 
 ```text
 ! operating system
-  macOS detected. Runners work here, but Runnerly has no service
-  integration for it.
+  openbsd detected. Runnerly is developed and tested on Linux;
+  anything else is untried.
 ```
 
-Expected, and a warning rather than a failure, so the exit code is still `0`.
+A warning rather than a failure, so the exit code is still `0`.
 
-A runner does register and run jobs on macOS. What is missing is the service
-integration: `runnerly agent systemd` generates a systemd unit, which macOS
-does not use, so run the agent yourself or keep it under launchd. Windows is
-not supported at all — the job hooks are shell scripts.
+Linux and macOS both pass. Windows is not supported at all — the job hooks
+are shell scripts, so cleanup between jobs and `busy` reporting would not
+work.
+
+## A macOS service says it is running and does nothing
+
+```text
+$ launchctl print gui/$(id -u)/dev.runnerly.agent.mac-mini | grep state
+	state = running
+```
+
+A pid, a job reporting itself running, an empty log, and nothing happening.
+The usual cause is a protected folder: macOS guards `~/Desktop`,
+`~/Documents`, `~/Downloads` and iCloud Drive behind a consent prompt, and a
+process launchd starts cannot show one — so it blocks inside the dynamic
+linker before running any of its own code.
+
+`runnerly doctor` checks for this:
+
+```text
+! protected folders
+  Runnerly itself is in ~/Desktop.
+```
+
+Move the binaries and the runner directory somewhere else. Full details in
+[macos.md](macos.md).
 
 ## GitHub says 404 for a repository that exists
 

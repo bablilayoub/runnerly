@@ -107,9 +107,10 @@ provisioning step:
 runnerly doctor --json > /var/log/runnerly-doctor.json || exit 1
 ```
 
-Warnings do not fail the run. On macOS, for example, `doctor` warns that
-`agent systemd` generates a unit macOS does not use — runners themselves work
-there — and still exits `0`.
+Warnings do not fail the run. On macOS, for example, `doctor` warns when
+Runnerly or the runner directory has ended up in a folder the system guards,
+because a service started there hangs without saying why — and still exits
+`0`. See [macos.md](macos.md).
 
 ## Create a configuration
 

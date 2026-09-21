@@ -12,9 +12,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -133,6 +135,7 @@ func Run(ctx context.Context, opts Options) Report {
 			"Runnerly does not need curl, but many workflows assume it is present.",
 			"sudo apt-get update && sudo apt-get install -y curl"),
 		checkRunnerRuntime(ctx, opts),
+		checkProtectedPaths(opts),
 	}
 
 	dockerInstalled := checkDocker(opts)
@@ -189,15 +192,19 @@ func checkOS(goos string) Check {
 		c.Detail = "Linux detected"
 		return c
 	}
-	c.Status = StatusWarn
 	switch goos {
 	case "darwin":
-		// A runner does register and run jobs here; what is missing is the
-		// service integration, since the unit Runnerly generates is
-		// systemd. Saying "do not register a runner" was simply wrong.
-		c.Detail = "macOS detected. Runners work here, but Runnerly has no service\n" +
-			"integration for it: `agent systemd` generates a systemd unit, which macOS\n" +
-			"does not use. Run the agent yourself, or keep it under launchd."
+		// Runners register, run jobs, clean up and come back after a reboot
+		// here. This used to warn that there was no service integration,
+		// which was true until `agent launchd` existed.
+		c.Status = StatusPass
+		c.Detail = "macOS detected. Use `agent launchd` for the service; a LaunchAgent\n" +
+			"needs the machine to log in, so enable automatic login on a build host."
+		return c
+	}
+
+	c.Status = StatusWarn
+	switch goos {
 	case "windows":
 		c.Detail = "Windows detected. Runnerly does not support Windows runners: the job\n" +
 			"hooks it installs are shell scripts, so cleanup and busy reporting do not work."
@@ -561,4 +568,105 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// tccProtected lists the folders macOS guards, relative to a home directory.
+//
+// A process launchd starts has no way to answer a consent prompt for one of
+// these, so it does not fail — it blocks. See checkProtectedPaths.
+var tccProtected = []string{
+	"Desktop",
+	"Documents",
+	"Downloads",
+	"Library/Mobile Documents", // iCloud Drive
+}
+
+// checkProtectedPaths warns when a path the agent needs sits in a folder
+// macOS guards with a consent prompt.
+//
+// This is here because it happened. A LaunchAgent whose binary was on the
+// Desktop came up with `launchctl print` reporting `state = running` and a
+// pid, and never did anything: no log line, no error, no exit. The process
+// was stopped inside dyld, in open(), on its own executable, waiting for a
+// consent prompt that a background job cannot show and nobody was there to
+// answer. Three minutes of that looks exactly like a hung agent.
+//
+// Nothing about the symptom points at the cause, which is what makes it
+// worth a check. Moving the binary and the runner out of these folders is
+// the whole fix; granting Full Disk Access to launchd is the other one, and
+// is a much bigger hammer than a CI runner needs.
+func checkProtectedPaths(opts Options) Check {
+	c := Check{Name: "protected folders"}
+
+	if opts.Env.GOOS != "darwin" {
+		c.Status = StatusSkip
+		c.Detail = "only macOS guards folders this way."
+		return c
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		c.Status = StatusSkip
+		c.Detail = "no home directory to check paths against."
+		return c
+	}
+
+	// The runner directory comes from the configuration; the binary is
+	// wherever this process was started from, which is what a generated
+	// plist will name.
+	candidates := map[string]string{
+		"the runner directory": opts.Config.Runner.Dir,
+	}
+	if self, err := os.Executable(); err == nil {
+		candidates["Runnerly itself"] = self
+	}
+
+	var found []string
+	for what, path := range candidates {
+		if path == "" {
+			continue
+		}
+		if folder, ok := protectedFolder(home, path); ok {
+			found = append(found, fmt.Sprintf("%s is in ~/%s", what, folder))
+		}
+	}
+
+	if len(found) == 0 {
+		c.Status = StatusPass
+		c.Detail = "nothing the agent needs is in a folder macOS guards."
+		return c
+	}
+
+	sort.Strings(found)
+	c.Status = StatusWarn
+	c.Detail = strings.Join(found, ", ") + ".\n" +
+		"Run by launchd, a process reading one of these blocks on a consent prompt\n" +
+		"it cannot show: the job reports itself running and does nothing at all."
+	c.Remedy = "move them somewhere else, for example ~/.runnerly and /usr/local/bin"
+	return c
+}
+
+// protectedFolder reports which guarded folder path is inside, if any.
+func protectedFolder(home, path string) (string, bool) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	// Symlinks matter: /tmp is a link to /private/tmp, and a path through
+	// one guarded folder into another is still guarded.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	realHome := home
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		realHome = resolved
+	}
+
+	for _, folder := range tccProtected {
+		guarded := filepath.Join(realHome, folder)
+		if abs == guarded || strings.HasPrefix(abs, guarded+string(filepath.Separator)) {
+			return folder, true
+		}
+	}
+	return "", false
 }

@@ -49,6 +49,7 @@ const ORDER = [
   "github",
   "runners",
   "agent",
+  "macos",
   "docker",
   "ephemeral-runners",
   "server",

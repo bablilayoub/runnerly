@@ -240,8 +240,10 @@ scheduling, multi-tenancy and local workflow execution.
 
 Windows runners are out of scope for a concrete reason: the job hooks are
 shell scripts, so cleanup between jobs and `busy` reporting would not work.
-macOS is different — runners do register and run jobs there; what is missing
-is service integration, since the unit `agent systemd` generates is systemd.
+macOS is supported: `agent launchd` writes a LaunchAgent, which is what a
+Mac has instead of systemd. It is an agent rather than a daemon on purpose,
+because a daemon has no login session and a Mac build usually needs one.
+See [macos.md](macos.md).
 
 ## Dependency policy
 

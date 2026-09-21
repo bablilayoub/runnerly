@@ -6,6 +6,30 @@ land.
 
 ## Unreleased
 
+### Added
+
+- **macOS is supported rather than tolerated.** `runnerly agent launchd`
+  and `runnerly ephemeral launchd` write the LaunchAgent that is a Mac's
+  equivalent of a systemd unit, and `doctor` stops warning about the
+  platform. An agent rather than a daemon, deliberately: a daemon has no
+  login session, and a Mac build usually needs one for the keychain and
+  code signing — which is also why the machine has to log in for the
+  runner to come back after a reboot, and the printed instructions say so.
+  The plist sets a PATH that includes both Homebrew prefixes, because
+  launchd's minimal one is how a runner that works in a terminal fails as
+  a service.
+- `doctor` warns when Runnerly or the runner directory is inside a folder
+  macOS guards — Desktop, Documents, Downloads, iCloud Drive. Started by
+  launchd from one of those, the agent does not fail: it blocks inside the
+  dynamic linker waiting for a consent prompt no background job can show,
+  and `launchctl print` cheerfully reports `state = running` with a pid
+  and an empty log for as long as you leave it. This was found by running
+  it, not by reading about it.
+- `make lint-platforms` runs the linter once for every platform Runnerly
+  compiles for. Build tags hide files from the linter as surely as from
+  the compiler, so a clean local run had been checking only the files that
+  build on the machine running it.
+
 ### Changed
 
 - The dashboard is rebuilt on [shadcn/ui](https://ui.shadcn.com). It looks

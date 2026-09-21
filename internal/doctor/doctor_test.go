@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -192,7 +194,10 @@ func TestMissingGitFailsButMissingCurlOnlyWarns(t *testing.T) {
 	}
 }
 
-func TestNonLinuxWarnsRatherThanFails(t *testing.T) {
+// macOS passes now that `agent launchd` exists. It warned while the only
+// service file Runnerly could write was a systemd unit, which was honest
+// then and would be a lie now.
+func TestMacOSPasses(t *testing.T) {
 	srv := okServer(t)
 	env := healthyEnv(t, srv.URL)
 	env.GOOS = "darwin"
@@ -200,11 +205,32 @@ func TestNonLinuxWarnsRatherThanFails(t *testing.T) {
 	report := Run(context.Background(), Options{Config: config.Default(), Env: env})
 	c := byName(t, report, "operating system")
 
-	if c.Status != StatusWarn {
-		t.Errorf("operating system = %q, want warn on darwin", c.Status)
+	if c.Status != StatusPass {
+		t.Errorf("operating system = %q, want pass on darwin", c.Status)
+	}
+	if !strings.Contains(c.Detail, "launchd") {
+		t.Errorf("the macOS detail does not name launchd: %q", c.Detail)
 	}
 	if !report.OK() {
-		t.Error("darwin should not fail the report; the CLI still works")
+		t.Error("darwin should not fail the report")
+	}
+}
+
+// Everything that is not Linux or macOS still warns: it is untried, and
+// saying so is the point of the check.
+func TestUntriedPlatformWarnsRatherThanFails(t *testing.T) {
+	srv := okServer(t)
+	env := healthyEnv(t, srv.URL)
+	env.GOOS = "openbsd"
+
+	report := Run(context.Background(), Options{Config: config.Default(), Env: env})
+	c := byName(t, report, "operating system")
+
+	if c.Status != StatusWarn {
+		t.Errorf("operating system = %q, want warn on openbsd", c.Status)
+	}
+	if !report.OK() {
+		t.Error("an untried platform should not fail the report; the CLI still works")
 	}
 }
 
@@ -583,5 +609,79 @@ func TestRunnerRuntimeSkipsOffLinux(t *testing.T) {
 		if c := checkRunnerRuntime(context.Background(), Options{Env: env}); c.Status != StatusSkip {
 			t.Errorf("%s: status = %q, want a skip", goos, c.Status)
 		}
+	}
+}
+
+// TestProtectedFolderRecognizesTheGuardedOnes covers the check added after
+// a LaunchAgent whose binary was on the Desktop came up "running" with a
+// pid and then did nothing at all: it was stopped in dyld waiting for a
+// consent prompt no background job can show.
+func TestProtectedFolderRecognizesTheGuardedOnes(t *testing.T) {
+	home := t.TempDir()
+	for _, folder := range tccProtected {
+		if err := os.MkdirAll(filepath.Join(home, folder, "runnerly"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".runnerly"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, folder := range tccProtected {
+		inside := filepath.Join(home, folder, "runnerly")
+		if got, ok := protectedFolder(home, inside); !ok || got != folder {
+			t.Errorf("protectedFolder(%q) = %q, %v; want %q, true", inside, got, ok, folder)
+		}
+		// The folder itself, not only something under it.
+		if _, ok := protectedFolder(home, filepath.Join(home, folder)); !ok {
+			t.Errorf("%s itself was not recognized", folder)
+		}
+	}
+
+	for _, safe := range []string{
+		filepath.Join(home, ".runnerly"),
+		filepath.Join(home, "Documents-elsewhere"),
+		"/usr/local/bin",
+		"/opt/runnerly",
+	} {
+		if folder, ok := protectedFolder(home, safe); ok {
+			t.Errorf("protectedFolder(%q) claimed ~/%s", safe, folder)
+		}
+	}
+}
+
+// A sibling whose name merely starts with a guarded one is not inside it.
+func TestProtectedFolderDoesNotMatchAPrefix(t *testing.T) {
+	home := t.TempDir()
+	if _, ok := protectedFolder(home, filepath.Join(home, "DesktopBackup")); ok {
+		t.Error("DesktopBackup was treated as being inside Desktop")
+	}
+}
+
+func TestProtectedPathsSkipsOffMacOS(t *testing.T) {
+	c := checkProtectedPaths(Options{Env: Env{GOOS: "linux"}})
+	if c.Status != StatusSkip {
+		t.Errorf("status on linux = %q, want skip", c.Status)
+	}
+}
+
+func TestProtectedPathsWarnsAboutTheRunnerDirectory(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory on this machine")
+	}
+
+	cfg := config.Default()
+	cfg.Runner.Dir = filepath.Join(home, "Documents", "runners")
+
+	c := checkProtectedPaths(Options{Config: cfg, Env: Env{GOOS: "darwin"}})
+	if c.Status != StatusWarn {
+		t.Fatalf("status = %q, want warn; detail = %q", c.Status, c.Detail)
+	}
+	if !strings.Contains(c.Detail, "runner directory") || !strings.Contains(c.Detail, "Documents") {
+		t.Errorf("detail does not name what is wrong: %q", c.Detail)
+	}
+	if c.Remedy == "" {
+		t.Error("a warning with no remedy leaves the reader nowhere to go")
 	}
 }
