@@ -27,7 +27,9 @@ export function Runners() {
   // that are actually in service.
   const includeRetired = params.get('retired') === 'true'
 
-  const { data, error, initial } = useLoad(() => api.runners(includeRetired), POLL_MS)
+  const { data, error, initial } = useLoad(() => api.runners(includeRetired), POLL_MS, [
+    includeRetired,
+  ])
   const navigate = useNavigate()
   const now = useNow() // keep the heartbeat ages moving between polls
 

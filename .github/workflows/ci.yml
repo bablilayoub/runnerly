@@ -313,8 +313,18 @@ jobs:
           ./runnerly.exe config init
           ./runnerly.exe config path
           ./runnerly.exe config show
+          # doctor exits non-zero when the machine is missing something,
+          # and this one is: no Docker daemon a Linux container could use.
+          # That is doctor working. What is checked here is that it ran
+          # and produced the JSON it promises, whatever the verdict.
           ./runnerly.exe doctor --offline --json > doctor.json
-          Get-Content doctor.json | ConvertFrom-Json | Out-Null
+          $verdict = $LASTEXITCODE
+          $report = Get-Content doctor.json -Raw | ConvertFrom-Json
+          if (-not $report.checks) { throw "doctor produced no checks" }
+          if (-not ($report.checks | Where-Object { $_.name -eq 'operating system' })) {
+            throw "doctor did not report on the operating system"
+          }
+          Write-Host "doctor exited $verdict with $($report.checks.Count) checks"
         shell: pwsh
 
       - name: Check the machine readings actually ran

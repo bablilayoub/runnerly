@@ -30,9 +30,12 @@ export function RunnerDetail() {
   const navigate = useNavigate()
   const now = useNow()
 
-  const runner = useLoad(() => api.runner(id), POLL_MS)
-  const events = useLoad(() => api.events({ runnerId: id, limit: 50 }), POLL_MS)
-  const commands = useLoad(() => api.commands(id), POLL_MS)
+  // Keyed on the id: an event on the events page links straight to a
+  // different runner, and without this the page would show the previous
+  // one's machine and load until the next poll.
+  const runner = useLoad(() => api.runner(id), POLL_MS, [id])
+  const events = useLoad(() => api.events({ runnerId: id, limit: 50 }), POLL_MS, [id])
+  const commands = useLoad(() => api.commands(id), POLL_MS, [id])
 
   const [confirming, setConfirming] = useState<'restart' | 'remove' | null>(null)
 

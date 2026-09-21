@@ -16,8 +16,21 @@ export interface Loadable<T> {
  * Polling replaces the data in place rather than clearing it first: a
  * dashboard that flashes empty every few seconds is harder to read than one
  * that updates quietly.
+ *
+ * `deps` are the inputs the request depends on — a filter, a route
+ * parameter. Changing one fetches again at once instead of waiting for the
+ * next tick. Without that, picking "Error" on the events page highlighted
+ * the button and then showed the unfiltered list for another five seconds,
+ * which reads as a filter that does not work rather than one that is
+ * slow. The loader itself deliberately stays out of the dependency list:
+ * it is an inline arrow function, new on every render, and depending on it
+ * would restart the poll continuously.
  */
-export function useLoad<T>(load: () => Promise<T>, intervalMs = 0): Loadable<T> {
+export function useLoad<T>(
+  load: () => Promise<T>,
+  intervalMs = 0,
+  deps: readonly unknown[] = [],
+): Loadable<T> {
   const [data, setData] = useState<T>()
   const [error, setError] = useState<ApiError | Error>()
   const [loading, setLoading] = useState(true)
@@ -46,6 +59,10 @@ export function useLoad<T>(load: () => Promise<T>, intervalMs = 0): Loadable<T> 
     }
   }, [])
 
+  // Serialised, so a caller can pass an inline array without the effect
+  // re-running on identity alone.
+  const key = JSON.stringify(deps)
+
   useEffect(() => {
     const controller = new AbortController()
     void run(controller.signal)
@@ -66,7 +83,7 @@ export function useLoad<T>(load: () => Promise<T>, intervalMs = 0): Loadable<T> 
       controller.abort()
       clearInterval(timer)
     }
-  }, [run, intervalMs])
+  }, [run, intervalMs, key])
 
   return { data, error, loading, initial, reload: () => void run() }
 }

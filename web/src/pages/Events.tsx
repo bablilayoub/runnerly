@@ -31,6 +31,7 @@ export function Events() {
   const { data, error, initial } = useLoad(
     () => api.events(severity === 'all' ? { limit: 200 } : { severity, limit: 200 }),
     POLL_MS,
+    [severity],
   )
   const now = useNow()
 
