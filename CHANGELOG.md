@@ -6,6 +6,8 @@ land.
 
 ## Unreleased
 
+## 0.1.4
+
 ### Fixed
 
 - A successful dashboard sign-in answered with JSON saying "The web
