@@ -1,19 +1,20 @@
 # The landing page and its documentation, as a container.
 #
-# For a host that serves containers rather than reading Netlify's or
-# Cloudflare's _redirects file — Dokploy, Nixploy, a plain Docker host. The
-# rules those files describe are in the Caddyfile beside this one instead,
-# because a static host that ignores them serves a site whose every
-# documentation link 404s.
+# This lives at the repository root on purpose. The site is built from four
+# things — site/, docs/, assets/ and install.sh — so the build context has
+# to be the root, and most hosts derive the context from wherever the
+# Dockerfile sits. Put this in a subdirectory and the context becomes that
+# subdirectory, every COPY below fails with "not found", and the error does
+# not mention the context at all.
 #
-# Build from the REPOSITORY ROOT, not from deploy/site:
-#
-#   docker build -f deploy/site/Dockerfile -t runnerly-site .
+#   docker build -t runnerly-site .
 #   docker run --rm -p 8080:80 runnerly-site
 #
-# The context has to be the root because the site is built from three
-# things that live outside site/: the documentation in docs/, the logo in
-# assets/, and install.sh, which the page tells people to curl.
+# The Caddy configuration beside it in deploy/site/ holds two rules that
+# only matter in production: the fallback that makes /docs/agent resolve,
+# and the content type that lets install.sh be piped into a shell.
+#
+# This is the site. The control plane's image is deploy/docker/Dockerfile.
 
 FROM node:22-alpine AS build
 

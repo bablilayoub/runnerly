@@ -1,0 +1,21 @@
+# Keep the build context small. Without this the whole repository is sent
+# to the daemon, including two node_modules trees and the git history.
+.git
+**/node_modules
+**/dist
+site/dist
+internal/web/dist
+coverage.out
+coverage.html
+
+# Go build output and anything the Go toolchain needs, none of which the
+# site is built from.
+/dist
+cmd
+internal
+deploy/docker
+deploy/compose
+deploy/systemd
+*.go
+go.mod
+go.sum

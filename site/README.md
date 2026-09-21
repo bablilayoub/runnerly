@@ -149,19 +149,28 @@ the SPA handler, which would hand the shell an HTML page.
 
 ### On a container host
 
-`deploy/site/Dockerfile` builds the site and serves it with Caddy, with both
-of those rules in `deploy/site/Caddyfile`. For Dokploy, Nixploy, or any
-plain Docker host.
+The `Dockerfile` at the repository root builds the site and serves it with
+Caddy, using `deploy/site/Caddyfile` for both of those rules. For Dokploy,
+Nixploy, or any plain Docker host.
 
 ```bash
-docker build -f deploy/site/Dockerfile -t runnerly-site .
+docker build -t runnerly-site .
 docker run --rm -p 8080:80 runnerly-site
 ```
 
-**Build from the repository root, not from `site/`.** The site is built from
-three things outside this directory: `docs/`, `assets/`, and `install.sh`.
-The Dockerfile also fails the build if `install.sh` did not make it into
-`dist/`, so a broken copy step cannot ship a page whose one command 404s.
+**It is at the root deliberately.** The site is built from four things —
+`site/`, `docs/`, `assets/` and `install.sh` — so the build context has to
+be the repository root. Most hosts take the context from wherever the
+Dockerfile sits, so keeping it in a subdirectory silently made the context
+that subdirectory: every `COPY` failed with "not found", and nothing in the
+error mentioned the context. At the root, the default is correct and
+nothing needs configuring.
+
+If your host has a separate context setting, it should be `.` — the
+repository root.
+
+The build also fails if `install.sh` did not reach `dist/`, so a broken copy
+step cannot ship a page whose one advertised command 404s.
 
 ### On Netlify or Cloudflare Pages
 
