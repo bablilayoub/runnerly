@@ -19,7 +19,6 @@ land.
   still **not a supported platform**: there is no installer and nobody
   has watched a Windows runner take a job. [docs/windows.md](docs/windows.md)
   is the honest list.
-
 - **macOS is supported rather than tolerated.** `runnerly agent launchd`
   and `runnerly ephemeral launchd` write the LaunchAgent that is a Mac's
   equivalent of a systemd unit, and `doctor` stops warning about the
@@ -66,7 +65,9 @@ land.
   showed the previous runner's machine until the poll caught up.
 - A row in the runners list could only be opened with a mouse. The name
   is a link now; the row click stays as a convenience on top of it.
-
+- `setup` and `runner create` finished by telling you to run
+  `runnerly agent systemd`, whatever machine you were on. On a Mac that
+  is an instruction for a service manager that is not there.
 - Issuing or revoking an enrollment token left the audit trail on the same
   page saying nothing had been recorded, directly underneath the thing that
   had just been recorded.
