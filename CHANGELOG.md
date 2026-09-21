@@ -59,6 +59,14 @@ land.
 
 ### Fixed
 
+- A filter on the dashboard took effect on the next poll rather than at
+  once, so picking a severity highlighted the button and left the
+  unfiltered list on screen for five seconds. Same for "include retired",
+  and for following a link from one runner's page to another's, which
+  showed the previous runner's machine until the poll caught up.
+- A row in the runners list could only be opened with a mouse. The name
+  is a link now; the row click stays as a convenience on top of it.
+
 - Issuing or revoking an enrollment token left the audit trail on the same
   page saying nothing had been recorded, directly underneath the thing that
   had just been recorded.
