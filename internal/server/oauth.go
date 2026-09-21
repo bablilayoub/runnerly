@@ -163,7 +163,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		GitHubID:  identity.User.ID,
 		Login:     identity.User.Login,
 		Name:      identity.User.Name,
-		AvatarURL: "",
+		AvatarURL: identity.User.AvatarURL,
 	}, sealed)
 	if err != nil {
 		s.failInternal(w, r, err, "record the user")
@@ -183,12 +183,15 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log(r).Info("user signed in", "event", "user_signed_in", "user", user.Login)
 
-	// The dashboard is not built yet, so there is nowhere to send the
-	// operator. Saying so beats a redirect to a 404.
-	s.writeJSON(w, r, http.StatusOK, map[string]any{
-		"signed_in_as": user.Login,
-		"note":         "The web dashboard is not built yet. The session cookie is set, so the API is usable.",
-	})
+	// A browser is what got here, so the end of the flow has to be
+	// somewhere a browser can be. This used to answer with JSON saying the
+	// dashboard was not built yet, which stopped being true and left a
+	// successful sign-in looking at a blob of text.
+	//
+	// Relative on purpose: it goes to whatever host the operator actually
+	// reached, which is right even when server.url is behind a proxy that
+	// rewrites it.
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 // exchangeCode swaps an authorization code for an access token.

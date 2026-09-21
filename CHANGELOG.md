@@ -6,6 +6,24 @@ land.
 
 ## Unreleased
 
+### Fixed
+
+- A successful dashboard sign-in answered with JSON saying "The web
+  dashboard is not built yet", instead of going to the dashboard. It had
+  been true once. A browser is what completes an OAuth callback, so it
+  ends at the dashboard now.
+- The signed-in account's avatar was never stored. GitHub returns it,
+  the column held it, the header renders it, and the handler passed an
+  empty string — so every real sign-in showed initials. Third field of
+  this shape, after the runner version and the machine's memory and disk.
+- Nothing tested the half of sign-in that signs anyone in. The refusal
+  when OAuth is unconfigured and the redirect out to GitHub had tests;
+  the callback — the half that exchanges a code, identifies a user,
+  writes to the database and hands out a session — had none. It does
+  now, against a stand-in GitHub over TLS: the whole handshake, the
+  state check, a replayed callback, a login off the allow list, a denial,
+  and a code GitHub rejects.
+
 ## 0.1.3
 
 ### Added

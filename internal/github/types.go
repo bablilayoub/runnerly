@@ -8,6 +8,9 @@ type User struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Type  string `json:"type"`
+	// AvatarURL is shown beside the account in the dashboard. The column
+	// and the component for it existed long before anything read this.
+	AvatarURL string `json:"avatar_url"`
 }
 
 // Repository is the subset of a repository Runnerly cares about.
