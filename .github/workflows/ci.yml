@@ -332,20 +332,38 @@ jobs:
           exit 0
         shell: pwsh
 
-      - name: Check the machine readings actually ran
-        # This suite is the reason the job exists. It skips into a pass on
-        # any other platform, so a build tag going wrong would silently
-        # remove the only real verification Windows gets.
+      - name: Check the Windows-only tests actually ran
+        # These are the reason the job exists: each one checks something
+        # no other platform can check, and every one of them is behind a
+        # build tag. A tag going wrong, or a rename, would leave the suite
+        # passing with the verification gone — a skipped test and a passing
+        # one look identical in a summary.
+        #
+        # Each entry is a package and the test in it that must pass.
         run: |
-          go test -count=1 -v -run TestWindowsReadsThisMachine ./internal/machine/ | Tee-Object -FilePath machine.log
-          if (Select-String -Path machine.log -Pattern '--- SKIP' -Quiet) {
-            Write-Error "the Windows machine tests skipped"
+          $required = @(
+            @{ Package = './internal/machine/';    Test = 'TestWindowsReadsThisMachine' }
+            @{ Package = './internal/supervisor/'; Test = 'TestGracefulStopDeliversCtrlBreak' }
+            @{ Package = './internal/supervisor/'; Test = 'TestStartExecCanStartABatchFile' }
+            @{ Package = './internal/jobstate/';   Test = 'TestPowerShellHookRunsTheWayTheRunnerRunsIt' }
+            @{ Package = './internal/cli/';        Test = 'TestSchtasksImportsTheGeneratedTask' }
+          )
+
+          $missing = @()
+          foreach ($case in $required) {
+            $output = go test -count=1 -v -run "^$($case.Test)$" $case.Package 2>&1 | Out-String
+            Write-Host $output
+            if ($output -notmatch "--- PASS: $($case.Test)") {
+              $missing += "$($case.Test) did not pass in $($case.Package)"
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "::error::$_" }
             exit 1
           }
-          if (-not (Select-String -Path machine.log -Pattern '--- PASS' -Quiet)) {
-            Write-Error "the Windows machine tests did not run"
-            exit 1
-          }
+          Write-Host "all $($required.Count) Windows-only tests ran and passed"
+          exit 0
         shell: pwsh
 
   build:

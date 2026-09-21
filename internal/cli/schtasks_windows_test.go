@@ -46,7 +46,11 @@ func TestSchtasksImportsTheGeneratedTask(t *testing.T) {
 		"/create", "/xml", xmlPath, "/tn", name, "/ru", "SYSTEM", "/f")
 	if out, err := create.CombinedOutput(); err != nil {
 		if strings.Contains(string(out), "Access is denied") {
-			t.Skipf("registering a task needs an administrator: %s", out)
+			// Not a skip. Registering a task is the only thing that can
+			// say whether the document is valid, and a skip here would
+			// leave the suite green with that unchecked.
+			t.Fatalf("registering a task needs an administrator, "+
+				"so this ran without checking anything: %s", out)
 		}
 		body, _ := os.ReadFile(xmlPath) //nolint:errcheck // for the failure message only
 		t.Fatalf("Task Scheduler rejected the generated task: %v\n%s\n---\n%s", err, out, body)
