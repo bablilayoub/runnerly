@@ -136,19 +136,51 @@ page cannot end up advertising a stale copy. CI fails if it is missing.
 
 ## Deploying
 
-`site/dist` is static files, and nothing here assumes a particular host. Two
-things the host has to get right:
+`site/dist` is static files. Two things the host has to get right, and both
+of them are invisible in development:
 
-**The SPA fallback.** `/docs/agent` is a client-side route, not a file. Without
-a rewrite to `index.html` the landing page works and every link off it 404s.
-`public/_redirects` does this on Netlify and Cloudflare Pages; on anything
-else, configure the same fallback. Both serve a real file in preference to a
-rewrite, so `/install.sh` is still the installer.
+**The SPA fallback.** `/docs/agent` is a client-side route, not a file.
+Without a rewrite to `index.html` the landing page works and every link off
+it 404s — which nobody notices until someone else follows one.
 
 **install.sh as text.** It is piped into a shell, so it has to arrive as
-`text/plain` rather than as a download. `public/_headers` sets that on hosts
-that read it.
+`text/plain` rather than as a download, and it must never fall through to
+the SPA handler, which would hand the shell an HTML page.
+
+### On a container host
+
+`deploy/site/Dockerfile` builds the site and serves it with Caddy, with both
+of those rules in `deploy/site/Caddyfile`. For Dokploy, Nixploy, or any
+plain Docker host.
+
+```bash
+docker build -f deploy/site/Dockerfile -t runnerly-site .
+docker run --rm -p 8080:80 runnerly-site
+```
+
+**Build from the repository root, not from `site/`.** The site is built from
+three things outside this directory: `docs/`, `assets/`, and `install.sh`.
+The Dockerfile also fails the build if `install.sh` did not make it into
+`dist/`, so a broken copy step cannot ship a page whose one command 404s.
+
+### On Netlify or Cloudflare Pages
+
+`public/_redirects` and `public/_headers` cover the same two rules there.
+They are read by those hosts and **ignored by everything else** — on a plain
+nginx or Caddy server they are inert files, which is what `deploy/site/`
+exists for.
+
+### Verifying a deployment
+
+These are the checks worth running against a real deployment, because each
+one covers a failure that only appears there:
+
+```bash
+curl -o /dev/null -w '%{http_code}\n'  https://runnerly.dev/docs/agent   # 200, not 404
+curl -o /dev/null -w '%{content_type}\n' https://runnerly.dev/install.sh # text/plain
+curl -fsSL https://runnerly.dev/install.sh | sh -n                        # valid shell
+```
 
 `npx vite preview` has its own fallback built in, so it will happily serve
-deep links whether or not `_redirects` is correct. It proves the build, not
-the hosting.
+deep links whether or not any of this is configured. It proves the build,
+not the hosting.

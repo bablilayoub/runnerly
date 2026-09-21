@@ -1,0 +1,38 @@
+# Serving the landing page and its documentation.
+#
+# Two things here are not optional, and both are invisible until production.
+
+:80 {
+	root * /srv
+	encode zstd gzip
+
+	# install.sh is piped into a shell. Served with a guessed type it can
+	# arrive as a download instead of text, and `curl | sh` gets nothing
+	# useful. It is also the one path that must never fall through to the
+	# SPA handler below, which would hand the shell an HTML page.
+	@installer path /install.sh
+	header @installer Content-Type "text/plain; charset=utf-8"
+
+	# The documentation lives at client-side routes: /docs/agent is not a
+	# file on disk. Without this, the landing page works and every link off
+	# it 404s — which is the kind of thing nobody notices until someone
+	# else follows a link.
+	#
+	# try_files checks for a real file first, so assets, install.sh and the
+	# favicon are still served as themselves.
+	try_files {path} /index.html
+	file_server
+
+	# Hashed assets are immutable; the HTML is not, or a deploy would not
+	# reach anyone still holding the old page.
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	@html path /index.html /
+	header @html Cache-Control "no-cache"
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
